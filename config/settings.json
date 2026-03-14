@@ -1,0 +1,15 @@
+{
+  "mode": "single",
+  "api": {
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "database": {
+    "path": "database/cybercafe.db"
+  },
+  "print_monitor": {
+    "enabled": true,
+    "poll_interval_seconds": 1.2
+  },
+  "central_server_url": "http://127.0.0.1:8787"
+}

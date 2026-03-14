@@ -1,0 +1,33 @@
+# Python bytecode/cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
+build/
+dist/
+*.spec.bak
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local environment and logs
+.env
+*.log
+
+# Platform/editor extras
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Packaged binaries and temporary portability checks
+*.exe
+portable_*/
+
+# Test/runtime temp folders
+__pycache__/
