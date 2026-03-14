@@ -1,81 +1,94 @@
-# CyberCafe Print & Service Manager
+# ManAni Print & Service Manager
 
-CyberCafe Print & Service Manager is a desktop application for cyber cafes and print shops to automatically track print jobs, record manual services, and generate revenue reports.
+ManAni Print & Service Manager is a Windows desktop application for cyber cafes and print shops to manage print billing, service transactions, and revenue reporting from one interface.
 
-It is designed for practical shop use with a simple operator UI, offline-first data storage, and support for both single-PC and centralized multi-PC deployments.
+The system is designed to work in real shop environments with offline-first operation and simple workflows for non-technical operators.
 
-## Project Description
+## Project Overview
 
-This software helps shop operators:
+The software helps shops:
 
-- Automatically detect print activity from Windows printers.
-- Price black-and-white and color prints using configurable rates.
-- Record manual services such as PAN card support, Aadhaar updates, online exam registrations, scanning, lamination, and photo printing.
-- View daily, weekly, and monthly operational and revenue reports.
-- Run fully offline with local SQLite storage.
+- Automatically capture print jobs from Windows printers.
+- Calculate black-and-white and color print costs.
+- Record manual services (PAN card, Aadhaar support, exam registrations, scanning, lamination, photo printing, etc.).
+- Generate daily, weekly, and monthly reports.
+- Run fully offline using SQLite.
+- Operate in single-PC mode or centralized multi-PC mode.
 
 ## Key Features
 
-- Automatic print detection via Windows spooler (`pywin32`)
-- Black and white and color page pricing
-- Manual service tracking and service catalog management
-- Daily, weekly, and monthly reporting
-- Offline SQLite database
-- Single-PC and multi-PC centralized deployment
-- Theme-ready POS-style desktop UI (Light/Dark modes)
+- Automatic print detection via Windows print spooler (`pywin32`)
+- B&W and color price-per-page configuration
+- Service catalog and one-click service recording
+- Dashboard with totals and revenue metrics
+- Print log and calendar-based reporting
+- Retention options for old records (retain/archive/delete)
+- Light/Dark theme POS-style operator interface
 
 ## Architecture Overview
 
-System data flow:
+Data flow:
 
 `Print Monitor -> API Server -> SQLite Database -> UI Dashboard`
 
-### Module Responsibilities
+### Main Components
 
 - `client/print_monitor.py`
-  - Polls the Windows print spooler and sends print job records to the API.
+  - Detects print jobs from spooler and submits records to API.
 - `server/api.py`
-  - Exposes HTTP endpoints for settings, print jobs, services, dashboard, and reports.
+  - HTTP endpoints for jobs, settings, services, dashboard, reports, retention actions.
 - `server/database.py`
-  - Handles all SQLite operations, cost calculations, and report aggregation logic.
+  - Thread-safe SQLite operations, pricing logic, report aggregation.
 - `ui/*`
-  - Operator desktop interface for dashboard, print log, services, settings, and reports.
+  - Desktop UI for dashboard, services, settings, reports, and print logs.
 
-## Project Structure
+## Repository Structure
 
 ```text
-project_root/
+manani-print-manager/
   client/
   server/
   ui/
   database/
   config/
   docs/
-  tests/
   main.py
   requirements.txt
-  CyberCafeManager.spec
-  DEVELOPER_GUIDE.md
-  LICENSE
   README.md
+  DEVELOPER_GUIDE.md
+  INSTALLATION_GUIDE.md
+  LICENSE
   .gitignore
+  CyberCafeManager.spec
 ```
 
-## Installation Guide
+## Installation Guide (Developer/Technician)
 
-### 1) Install dependencies
+### 1. Install Python
+
+- Install Python on Windows and ensure it is added to `PATH`.
+- Recommended: use the same Python version family across deployment systems.
+
+### 2. Clone repository
+
+```bash
+git clone https://github.com/AnirudhManda0/manani-print-service-manager.git
+cd manani-print-service-manager
+```
+
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2) Initialize the database
+### 4. Initialize database
 
 ```bash
 python database/init_db.py
 ```
 
-### 3) Start the application
+### 5. Run application
 
 ```bash
 python main.py
@@ -85,15 +98,15 @@ python main.py
 
 ### Single Computer Mode
 
-Runs monitor + API + UI on one machine.
+Runs API + print monitor + UI on one PC.
 
 ```bash
 python main.py --mode single
 ```
 
-### Server Mode
+### Server Mode (Centralized)
 
-Runs central API/dashboard server (optionally headless).
+Runs API and optional UI on central machine.
 
 ```bash
 python main.py --mode server
@@ -102,82 +115,102 @@ python main.py --mode server --headless
 
 ### Client Monitor Mode
 
-Runs print monitor client that forwards print jobs to central server.
+Runs lightweight print monitor on client PCs and sends jobs to central server.
 
 ```bash
 python main.py --mode client --server-url http://<SERVER_IP>:8787
-# or
+```
+
+or:
+
+```bash
 python client/run_client.py --server-url http://<SERVER_IP>:8787
 ```
 
-## Printer Setup (Windows)
+## Printer Setup Guide
 
-1. Install printer drivers from manufacturer.
-2. Confirm printers appear in **Devices and Printers**.
+1. Install printer drivers on each machine.
+2. Confirm printers appear in **Control Panel > Devices and Printers**.
 3. Ensure **Print Spooler** service is running (`services.msc`).
-4. Print a test page.
-5. Verify print entry appears in the app's Print Log.
+4. Print a test document.
+5. Verify a new record appears in **Print Log**.
 
-## Database Structure
+### Print Detection Workflow
 
-Main SQLite tables:
+`Windows Printer -> Print Spooler -> print_monitor.py -> API -> SQLite -> Dashboard/Reports`
 
-- `print_jobs`
-  - Stores detected print jobs including pages, print type, and computed cost.
-- `services_catalog`
-  - Stores available service types and default prices.
-- `service_records`
-  - Stores each performed service transaction.
-- `settings`
-  - Stores pricing, currency, and retention settings.
+Captured fields:
 
-Schema source: `database/schema.sql`
+- printer name
+- document name
+- page count
+- timestamp
+- print type (B&W or color when detectable)
 
-## Build Executable (PyInstaller)
+## Deployment Guide
+
+### Build executable
 
 ```bash
 pyinstaller CyberCafeManager.spec
 ```
 
-Output binary:
+Output:
 
 - `dist/CyberCafeManager.exe`
+
+### Share software with another PC
+
+1. Copy executable (or full project folder) to target system.
+2. Ensure printer drivers are installed on target machine.
+3. Run application.
+4. Configure print prices and services.
+5. Print a sample document and verify detection/logging.
+
+## Multi-PC Deployment (Cyber Cafe)
+
+1. Set one machine as central server (`--mode server`).
+2. Keep database on server machine.
+3. Configure client machines to run monitor mode with server URL.
+4. Verify all client print jobs appear on server dashboard/reporting screens.
+
+## Database Structure
+
+Main tables:
+
+- `print_jobs`
+- `services_catalog`
+- `service_records`
+- `settings`
+
+Schema file: `database/schema.sql`
 
 ## Troubleshooting
 
 ### Printer not detected
 
-- Verify printer driver installation.
-- Confirm Windows Print Spooler is running.
-- Confirm monitor is enabled in `config/settings.json`.
+- Check printer drivers.
+- Confirm print spooler is running.
+- Confirm monitor mode is enabled and API is reachable.
 
 ### Database locked
 
 - Close duplicate app instances.
-- Avoid opening the database from external tools during active writes.
-- Restart the application and retry.
+- Avoid external DB editors while app is active.
+- Restart app after ensuring only one server writes to DB.
 
 ### Application startup errors
 
-- Verify dependencies installed: `pip install -r requirements.txt`
-- Reinitialize DB: `python database/init_db.py`
-- Check `config/settings.json` syntax/values.
+- Reinstall dependencies.
+- Validate `config/settings.json`.
+- Reinitialize DB with `python database/init_db.py`.
 
-## Future Development Workflow
+## Documentation
 
-Use this update workflow for all future changes:
+- Developer internals: `DEVELOPER_GUIDE.md`
+- Installation/sharing guide: `INSTALLATION_GUIDE.md`
+- Operator manual: `docs/CyberCafeManager_Documentation.docx`
 
-1. Modify code.
-2. Run validation/tests.
-3. Commit with meaningful message.
-4. Push to remote.
+## License
 
-Commands:
-
-```bash
-git add .
-git commit -m "Describe feature or fix"
-git push
-```
-
-Use clear commit messages (for example: `Fix print cost rounding`, `Add retention status API`, `Improve dark mode contrast`).
+This project is licensed under the MIT License. See `LICENSE`.
