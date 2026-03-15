@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.formatting import format_currency
+
 
 class ReportStat(QFrame):
     def __init__(self, title: str) -> None:
@@ -75,6 +77,8 @@ class ReportsPanel(QWidget):
         self.stat_total_pages = ReportStat("Total Pages")
         self.stat_bw = ReportStat("B&W Pages")
         self.stat_color = ReportStat("Color Pages")
+        self.stat_a4 = ReportStat("A4 Prints")
+        self.stat_a3 = ReportStat("A3 Prints")
         self.stat_services = ReportStat("Services")
         self.stat_print_rev = ReportStat("Printing Revenue")
         self.stat_total_rev = ReportStat("Total Revenue")
@@ -82,9 +86,11 @@ class ReportsPanel(QWidget):
         self.stat_grid.addWidget(self.stat_total_pages, 0, 1)
         self.stat_grid.addWidget(self.stat_bw, 0, 2)
         self.stat_grid.addWidget(self.stat_color, 0, 3)
-        self.stat_grid.addWidget(self.stat_services, 1, 0)
-        self.stat_grid.addWidget(self.stat_print_rev, 1, 1)
-        self.stat_grid.addWidget(self.stat_total_rev, 1, 2)
+        self.stat_grid.addWidget(self.stat_a4, 1, 0)
+        self.stat_grid.addWidget(self.stat_a3, 1, 1)
+        self.stat_grid.addWidget(self.stat_services, 1, 2)
+        self.stat_grid.addWidget(self.stat_print_rev, 1, 3)
+        self.stat_grid.addWidget(self.stat_total_rev, 2, 0, 1, 2)
         layout.addLayout(self.stat_grid)
 
         self.summary_box = QTextEdit()
@@ -118,9 +124,11 @@ class ReportsPanel(QWidget):
             [
                 f"Date/Range: {report.get('label', '')}",
                 f"Total Pages Printed: {summary.get('total_pages', 0)}",
+                f"A4 Prints: {summary.get('a4_print_jobs', 0)}",
+                f"A3 Prints: {summary.get('a3_print_jobs', 0)}",
                 f"Total Services: {summary.get('total_services', 0)}",
-                f"Total Revenue: {currency} {summary.get('total_revenue', 0):.2f}",
-                f"Service Revenue: {currency} {summary.get('service_revenue', 0):.2f}",
+                f"Total Revenue: {format_currency(currency, summary.get('total_revenue', 0))}",
+                f"Service Revenue: {format_currency(currency, summary.get('service_revenue', 0))}",
                 "Service Breakdown:",
             ]
         )
@@ -129,13 +137,15 @@ class ReportsPanel(QWidget):
         self.stat_total_pages.set_value(str(summary.get("total_pages", 0)))
         self.stat_bw.set_value(str(summary.get("bw_pages", 0)))
         self.stat_color.set_value(str(summary.get("color_pages", 0)))
+        self.stat_a4.set_value(str(summary.get("a4_print_jobs", 0)))
+        self.stat_a3.set_value(str(summary.get("a3_print_jobs", 0)))
         self.stat_services.set_value(str(summary.get("total_services", 0)))
-        self.stat_print_rev.set_value(f"{currency} {summary.get('printing_revenue', 0):.2f}")
-        self.stat_total_rev.set_value(f"{currency} {summary.get('total_revenue', 0):.2f}")
+        self.stat_print_rev.set_value(format_currency(currency, summary.get("printing_revenue", 0)))
+        self.stat_total_rev.set_value(format_currency(currency, summary.get("total_revenue", 0)))
 
         items = report.get("services_breakdown", [])
         self.service_table.setRowCount(len(items))
         for row, item in enumerate(items):
             self.service_table.setItem(row, 0, QTableWidgetItem(str(item.get("service_name", ""))))
             self.service_table.setItem(row, 1, QTableWidgetItem(str(item.get("count", 0))))
-            self.service_table.setItem(row, 2, QTableWidgetItem(f"{currency} {item.get('revenue', 0):.2f}"))
+            self.service_table.setItem(row, 2, QTableWidgetItem(format_currency(currency, item.get("revenue", 0))))

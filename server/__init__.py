@@ -1,1 +1,1 @@
-# Server package for CyberCafe Print & Service Manager.
+# Server package for ManAni Print & Service Manager.

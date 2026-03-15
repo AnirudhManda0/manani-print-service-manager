@@ -1,1 +1,1 @@
-# Client package for CyberCafe Print & Service Manager.
+# Client package for ManAni Print & Service Manager.

@@ -47,6 +47,8 @@ class APIClient:
         currency: str,
         retention_mode: str = "retain_all",
         retention_days: int = 30,
+        backup_enabled: bool = True,
+        backup_folder: str = "backup",
     ) -> dict:
         return self._put(
             "/api/settings",
@@ -56,6 +58,8 @@ class APIClient:
                 "currency": currency,
                 "retention_mode": retention_mode,
                 "retention_days": retention_days,
+                "backup_enabled": backup_enabled,
+                "backup_folder": backup_folder,
             },
         )
 
@@ -80,3 +84,6 @@ class APIClient:
 
     def execute_retention(self, mode: str, days: int = 30) -> dict:
         return self._post("/api/data-retention/execute", {"mode": mode, "days": days})
+
+    def run_daily_backup(self, force: bool = False) -> dict:
+        return self._post(f"/api/backup/run?force={'true' if force else 'false'}", {})

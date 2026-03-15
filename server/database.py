@@ -2,7 +2,15 @@ import os
 import sqlite3
 import threading
 from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Dict, List, Optional, Tuple
+
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+MONEY_QUANT = Decimal("0.01")
 
 
 class Database:
@@ -22,6 +30,39 @@ class Database:
         self._configure()
         self.initialize()
 
+    @staticmethod
+    def _to_decimal(value: object, fallback: str = "0") -> Decimal:
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal(fallback)
+
+    @classmethod
+    def _money(cls, value: object) -> Decimal:
+        return cls._to_decimal(value).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _money_float(value: Decimal) -> float:
+        return float(value.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP))
+
+    @staticmethod
+    def _normalize_paper_size(paper_size: Optional[str]) -> str:
+        if not paper_size:
+            return "Unknown"
+        token = str(paper_size).strip().upper()
+        if token == "A3":
+            return "A3"
+        if token == "A4":
+            return "A4"
+        if token == "LETTER":
+            return "Letter"
+        return "Unknown"
+
+    @staticmethod
+    def _safe_backup_folder(value: Optional[str]) -> str:
+        candidate = (value or "backup").strip()
+        return candidate or "backup"
+
     def _configure(self) -> None:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL;")
@@ -36,26 +77,41 @@ class Database:
             self._migrate_schema()
             self._conn.commit()
 
+    def _table_columns(self, table_name: str) -> set:
+        return {row["name"] for row in self._conn.execute(f"PRAGMA table_info({table_name});").fetchall()}
+
     def _migrate_schema(self) -> None:
         """Backward-compatible schema migration for existing DB files."""
-        columns = {
-            row["name"] for row in self._conn.execute("PRAGMA table_info(settings);").fetchall()
-        }
-        if "retention_mode" not in columns:
-            self._conn.execute(
-                "ALTER TABLE settings ADD COLUMN retention_mode TEXT NOT NULL DEFAULT 'retain_all';"
-            )
-        if "retention_days" not in columns:
-            self._conn.execute(
-                "ALTER TABLE settings ADD COLUMN retention_days INTEGER NOT NULL DEFAULT 30;"
-            )
+        settings_columns = self._table_columns("settings")
+        if "retention_mode" not in settings_columns:
+            self._conn.execute("ALTER TABLE settings ADD COLUMN retention_mode TEXT NOT NULL DEFAULT 'retain_all';")
+        if "retention_days" not in settings_columns:
+            self._conn.execute("ALTER TABLE settings ADD COLUMN retention_days INTEGER NOT NULL DEFAULT 30;")
+        if "backup_enabled" not in settings_columns:
+            self._conn.execute("ALTER TABLE settings ADD COLUMN backup_enabled INTEGER NOT NULL DEFAULT 1;")
+        if "backup_folder" not in settings_columns:
+            self._conn.execute("ALTER TABLE settings ADD COLUMN backup_folder TEXT NOT NULL DEFAULT 'backup';")
+        if "last_backup_date" not in settings_columns:
+            self._conn.execute("ALTER TABLE settings ADD COLUMN last_backup_date TEXT NOT NULL DEFAULT '';")
+
+        print_columns = self._table_columns("print_jobs")
+        if "paper_size" not in print_columns:
+            self._conn.execute("ALTER TABLE print_jobs ADD COLUMN paper_size TEXT NOT NULL DEFAULT 'Unknown';")
 
         self._conn.execute(
             """
             INSERT OR IGNORE INTO settings (
-                id, bw_price_per_page, color_price_per_page, currency, retention_mode, retention_days
+                id,
+                bw_price_per_page,
+                color_price_per_page,
+                currency,
+                retention_mode,
+                retention_days,
+                backup_enabled,
+                backup_folder,
+                last_backup_date
             )
-            VALUES (1, 2.0, 10.0, 'INR', 'retain_all', 30);
+            VALUES (1, 2.0, 10.0, 'INR', 'retain_all', 30, 1, 'backup', '');
             """
         )
 
@@ -77,7 +133,10 @@ class Database:
                     color_price_per_page,
                     currency,
                     retention_mode,
-                    retention_days
+                    retention_days,
+                    backup_enabled,
+                    backup_folder,
+                    last_backup_date
                 FROM settings
                 WHERE id = 1;
                 """
@@ -87,7 +146,13 @@ class Database:
                 data["retention_mode"] = (
                     data["retention_mode"] if data["retention_mode"] in self.VALID_RETENTION_MODES else "retain_all"
                 )
-                data["retention_days"] = int(data.get("retention_days", 30) or 30)
+                data["retention_days"] = max(1, int(data.get("retention_days", 30) or 30))
+                data["bw_price_per_page"] = self._money_float(self._money(data.get("bw_price_per_page", 2.0)))
+                data["color_price_per_page"] = self._money_float(self._money(data.get("color_price_per_page", 10.0)))
+                data["currency"] = (str(data.get("currency", "INR") or "INR").strip() or "INR").upper()
+                data["backup_enabled"] = bool(int(data.get("backup_enabled", 1) or 0))
+                data["backup_folder"] = self._safe_backup_folder(data.get("backup_folder", "backup"))
+                data["last_backup_date"] = str(data.get("last_backup_date", "") or "")
                 return data
             return {
                 "bw_price_per_page": 2.0,
@@ -95,6 +160,9 @@ class Database:
                 "currency": "INR",
                 "retention_mode": "retain_all",
                 "retention_days": 30,
+                "backup_enabled": True,
+                "backup_folder": "backup",
+                "last_backup_date": "",
             }
 
     def update_settings(
@@ -104,9 +172,16 @@ class Database:
         currency: str,
         retention_mode: str = "retain_all",
         retention_days: int = 30,
+        backup_enabled: bool = True,
+        backup_folder: str = "backup",
     ) -> Dict[str, object]:
         safe_mode = retention_mode if retention_mode in self.VALID_RETENTION_MODES else "retain_all"
         safe_days = max(1, int(retention_days))
+        safe_currency = (currency.strip() or "INR").upper()
+        bw_price = self._money(bw_price_per_page)
+        color_price = self._money(color_price_per_page)
+        backup_flag = 1 if bool(backup_enabled) else 0
+        safe_backup_folder = self._safe_backup_folder(backup_folder)
         with self._lock:
             self._conn.execute(
                 """
@@ -116,12 +191,33 @@ class Database:
                     color_price_per_page = ?,
                     currency = ?,
                     retention_mode = ?,
-                    retention_days = ?
+                    retention_days = ?,
+                    backup_enabled = ?,
+                    backup_folder = ?
                 WHERE id = 1;
                 """,
-                (bw_price_per_page, color_price_per_page, currency, safe_mode, safe_days),
+                (
+                    self._money_float(bw_price),
+                    self._money_float(color_price),
+                    safe_currency,
+                    safe_mode,
+                    safe_days,
+                    backup_flag,
+                    safe_backup_folder,
+                ),
             )
             self._conn.commit()
+
+        logger.info(
+            "Settings updated: currency=%s bw_price=%s color_price=%s retention=%s/%s backup_enabled=%s backup_folder=%s",
+            safe_currency,
+            bw_price,
+            color_price,
+            safe_mode,
+            safe_days,
+            bool(backup_flag),
+            safe_backup_folder,
+        )
         return self.get_settings()
 
     def add_print_job(
@@ -131,27 +227,53 @@ class Database:
         document_name: str,
         pages: int,
         print_type: str,
+        paper_size: str = "Unknown",
         timestamp: Optional[datetime] = None,
     ) -> Dict[str, object]:
         safe_pages = max(0, int(pages))
         safe_type = "color" if print_type == "color" else "black_and_white"
+        safe_paper_size = self._normalize_paper_size(paper_size)
         settings = self.get_settings()
-        price_per_page = settings["color_price_per_page"] if safe_type == "color" else settings["bw_price_per_page"]
-        total_cost = round(float(price_per_page) * safe_pages, 2)
+        price_per_page = (
+            self._money(settings["color_price_per_page"])
+            if safe_type == "color"
+            else self._money(settings["bw_price_per_page"])
+        )
+        total_cost = (price_per_page * Decimal(safe_pages)).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
         ts = self._to_db_time(timestamp)
 
         with self._lock:
             cursor = self._conn.execute(
                 """
                 INSERT INTO print_jobs
-                (computer_name, printer_name, document_name, pages, print_type, price_per_page, total_cost, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                (computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (computer_name, printer_name, document_name, safe_pages, safe_type, float(price_per_page), total_cost, ts),
+                (
+                    computer_name,
+                    printer_name,
+                    document_name,
+                    safe_pages,
+                    safe_type,
+                    safe_paper_size,
+                    self._money_float(price_per_page),
+                    self._money_float(total_cost),
+                    ts,
+                ),
             )
             self._conn.commit()
             job_id = cursor.lastrowid
 
+        logger.info(
+            "Print job captured: id=%s computer=%s printer=%s pages=%s type=%s paper=%s total=%s",
+            job_id,
+            computer_name,
+            printer_name,
+            safe_pages,
+            safe_type,
+            safe_paper_size,
+            total_cost,
+        )
         return {
             "id": job_id,
             "computer_name": computer_name,
@@ -159,14 +281,25 @@ class Database:
             "document_name": document_name,
             "pages": safe_pages,
             "print_type": safe_type,
-            "price_per_page": float(price_per_page),
-            "total_cost": total_cost,
+            "paper_size": safe_paper_size,
+            "price_per_page": self._money_float(price_per_page),
+            "total_cost": self._money_float(total_cost),
             "timestamp": ts,
         }
 
     def list_print_jobs(self, limit: int = 300, date_filter: Optional[str] = None) -> List[Dict[str, object]]:
         sql = """
-            SELECT id, computer_name, printer_name, document_name, pages, print_type, price_per_page, total_cost, timestamp
+            SELECT
+                id,
+                computer_name,
+                printer_name,
+                document_name,
+                pages,
+                print_type,
+                paper_size,
+                price_per_page,
+                total_cost,
+                timestamp
             FROM print_jobs
         """
         params: Tuple[object, ...]
@@ -183,17 +316,24 @@ class Database:
         return [dict(r) for r in rows]
 
     def add_service_catalog(self, service_name: str, default_price: float) -> Dict[str, object]:
+        safe_price = self._money(default_price)
         with self._lock:
             cursor = self._conn.execute(
                 """
                 INSERT INTO services_catalog (service_name, default_price)
                 VALUES (?, ?);
                 """,
-                (service_name.strip(), float(default_price)),
+                (service_name.strip(), self._money_float(safe_price)),
             )
             self._conn.commit()
             item_id = cursor.lastrowid
-        return {"id": item_id, "service_name": service_name.strip(), "default_price": float(default_price)}
+
+        logger.info("Service added: id=%s name=%s default_price=%s", item_id, service_name.strip(), safe_price)
+        return {
+            "id": item_id,
+            "service_name": service_name.strip(),
+            "default_price": self._money_float(safe_price),
+        }
 
     def list_services_catalog(self) -> List[Dict[str, object]]:
         with self._lock:
@@ -216,23 +356,24 @@ class Database:
             if row is None:
                 raise ValueError(f"service_id {service_id} does not exist")
 
-            final_price = float(price) if price is not None else float(row["default_price"])
+            final_price = self._money(price) if price is not None else self._money(row["default_price"])
             ts = self._to_db_time(timestamp)
             cursor = self._conn.execute(
                 """
                 INSERT INTO service_records (service_id, price, timestamp)
                 VALUES (?, ?, ?);
                 """,
-                (service_id, final_price, ts),
+                (service_id, self._money_float(final_price), ts),
             )
             self._conn.commit()
             rec_id = cursor.lastrowid
 
+        logger.info("Service recorded: record_id=%s service_id=%s price=%s", rec_id, service_id, final_price)
         return {
             "id": rec_id,
             "service_id": int(row["id"]),
             "service_name": row["service_name"],
-            "price": final_price,
+            "price": self._money_float(final_price),
             "timestamp": ts,
         }
 
@@ -245,6 +386,10 @@ class Database:
                     COALESCE(SUM(pages), 0) AS total_pages,
                     COALESCE(SUM(CASE WHEN print_type='black_and_white' THEN pages ELSE 0 END), 0) AS bw_pages,
                     COALESCE(SUM(CASE WHEN print_type='color' THEN pages ELSE 0 END), 0) AS color_pages,
+                    COALESCE(SUM(CASE WHEN paper_size='A4' THEN 1 ELSE 0 END), 0) AS a4_print_jobs,
+                    COALESCE(SUM(CASE WHEN paper_size='A3' THEN 1 ELSE 0 END), 0) AS a3_print_jobs,
+                    COALESCE(SUM(CASE WHEN paper_size='Letter' THEN 1 ELSE 0 END), 0) AS letter_print_jobs,
+                    COALESCE(SUM(CASE WHEN paper_size='Unknown' THEN 1 ELSE 0 END), 0) AS unknown_print_jobs,
                     COALESCE(SUM(total_cost), 0) AS printing_revenue,
                     COALESCE(AVG(pages), 0) AS avg_pages_per_job
                 FROM print_jobs
@@ -266,18 +411,24 @@ class Database:
             ).fetchone()
 
         print_jobs = int(print_row["total_print_jobs"])
-        printing_revenue = round(float(print_row["printing_revenue"]), 2)
+        printing_revenue = self._money(print_row["printing_revenue"])
+        service_revenue = self._money(service_row["service_revenue"])
+        avg_service_price = self._money(service_row["avg_service_price"])
         return {
             "total_print_jobs": print_jobs,
             "total_pages": int(print_row["total_pages"]),
             "bw_pages": int(print_row["bw_pages"]),
             "color_pages": int(print_row["color_pages"]),
-            "printing_revenue": printing_revenue,
+            "a4_print_jobs": int(print_row["a4_print_jobs"]),
+            "a3_print_jobs": int(print_row["a3_print_jobs"]),
+            "letter_print_jobs": int(print_row["letter_print_jobs"]),
+            "unknown_print_jobs": int(print_row["unknown_print_jobs"]),
+            "printing_revenue": self._money_float(printing_revenue),
             "avg_pages_per_job": round(float(print_row["avg_pages_per_job"]), 2),
-            "avg_revenue_per_job": round((printing_revenue / print_jobs), 2) if print_jobs else 0.0,
+            "avg_revenue_per_job": self._money_float(printing_revenue / print_jobs) if print_jobs else 0.0,
             "total_services": int(service_row["total_services"]),
-            "service_revenue": round(float(service_row["service_revenue"]), 2),
-            "avg_service_price": round(float(service_row["avg_service_price"]), 2),
+            "service_revenue": self._money_float(service_revenue),
+            "avg_service_price": self._money_float(avg_service_price),
         }
 
     def _service_breakdown_between(self, start_ts: str, end_ts: str) -> List[Dict[str, object]]:
@@ -330,12 +481,12 @@ class Database:
     def get_dashboard(self, day: Optional[str] = None) -> Dict[str, object]:
         start_ts, end_ts, label = self._range_from_period("daily", day)
         revenue = self._revenue_between(start_ts, end_ts)
-        total = round(revenue["printing_revenue"] + revenue["service_revenue"], 2)
+        total = self._money(Decimal(str(revenue["printing_revenue"])) + Decimal(str(revenue["service_revenue"])))
         settings = self.get_settings()
         return {
             "date": label,
             **revenue,
-            "total_revenue": total,
+            "total_revenue": self._money_float(total),
             "currency": settings["currency"],
         }
 
@@ -343,7 +494,7 @@ class Database:
         start_ts, end_ts, label = self._range_from_period(period, day)
         revenue = self._revenue_between(start_ts, end_ts)
         services = self._service_breakdown_between(start_ts, end_ts)
-        total = round(revenue["printing_revenue"] + revenue["service_revenue"], 2)
+        total = self._money(Decimal(str(revenue["printing_revenue"])) + Decimal(str(revenue["service_revenue"])))
         settings = self.get_settings()
         return {
             "period": period,
@@ -353,7 +504,7 @@ class Database:
             "currency": settings["currency"],
             "summary": {
                 **revenue,
-                "total_revenue": total,
+                "total_revenue": self._money_float(total),
             },
             "services_breakdown": services,
         }
@@ -393,6 +544,7 @@ class Database:
                 document_name TEXT,
                 pages INTEGER NOT NULL,
                 print_type TEXT NOT NULL,
+                paper_size TEXT NOT NULL DEFAULT 'Unknown',
                 price_per_page REAL NOT NULL,
                 total_cost REAL NOT NULL,
                 timestamp DATETIME NOT NULL
@@ -468,10 +620,10 @@ class Database:
                 self._conn.execute(
                     """
                     INSERT OR IGNORE INTO archive_db.print_jobs (
-                        id, computer_name, printer_name, document_name, pages, print_type, price_per_page, total_cost, timestamp
+                        id, computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp
                     )
                     SELECT
-                        id, computer_name, printer_name, document_name, pages, print_type, price_per_page, total_cost, timestamp
+                        id, computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp
                     FROM print_jobs
                     WHERE timestamp < ?;
                     """,
@@ -504,6 +656,13 @@ class Database:
                 self._conn.execute("DETACH DATABASE archive_db;")
                 raise
 
+        logger.info(
+            "Archived old records: cutoff=%s print_jobs=%s service_records=%s path=%s",
+            cutoff,
+            print_count,
+            service_count,
+            archive_path,
+        )
         return {
             "action": "archive",
             "archive_db_path": archive_path,
@@ -530,9 +689,50 @@ class Database:
             self._conn.execute("DELETE FROM print_jobs WHERE timestamp < ?;", (cutoff,))
             self._conn.commit()
 
+        logger.info("Deleted old records: cutoff=%s print_jobs=%s service_records=%s", cutoff, print_count, service_count)
         return {
             "action": "delete",
             "deleted_print_jobs": print_count,
             "deleted_service_records": service_count,
             "cutoff_timestamp": cutoff,
+        }
+
+    def _resolve_backup_folder(self, configured_folder: str) -> str:
+        expanded = os.path.expandvars(os.path.expanduser(self._safe_backup_folder(configured_folder)))
+        if os.path.isabs(expanded):
+            return expanded
+
+        db_dir = os.path.dirname(self.db_path)
+        project_root = os.path.abspath(os.path.join(db_dir, ".."))
+        return os.path.join(project_root, expanded)
+
+    def run_daily_backup(self, force: bool = False) -> Dict[str, object]:
+        with self._lock:
+            settings = self.get_settings()
+            if not settings.get("backup_enabled", True) and not force:
+                return {"status": "disabled", "backup_enabled": False}
+
+            today = date.today().isoformat()
+            if not force and settings.get("last_backup_date") == today:
+                return {"status": "skipped", "reason": "already_backed_up_today", "date": today}
+
+            backup_folder = self._resolve_backup_folder(str(settings.get("backup_folder", "backup")))
+            os.makedirs(backup_folder, exist_ok=True)
+            backup_path = os.path.join(backup_folder, f"cybercafe_{today.replace('-', '_')}.db")
+
+            backup_conn = sqlite3.connect(backup_path)
+            try:
+                self._conn.backup(backup_conn)
+                backup_conn.commit()
+            finally:
+                backup_conn.close()
+
+            self._conn.execute("UPDATE settings SET last_backup_date = ? WHERE id = 1;", (today,))
+            self._conn.commit()
+
+        logger.info("Database backup created: %s", backup_path)
+        return {
+            "status": "created",
+            "date": today,
+            "backup_path": backup_path,
         }

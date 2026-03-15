@@ -1,6 +1,8 @@
+import os
 from datetime import datetime
 
-from PySide6.QtCore import QDate, QTimer
+from PySide6.QtCore import QDate, QSize, QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QDateEdit,
     QHBoxLayout,
@@ -17,7 +19,9 @@ from PySide6.QtWidgets import (
 )
 
 from ui.dashboard import DashboardPanel
+from ui.formatting import format_currency
 from ui.reports_panel import ReportsPanel
+from ui.resources import ui_resource_path
 from ui.services_panel import ServicesPanel
 from ui.settings_panel import SettingsPanel
 from ui.theme import ThemeManager
@@ -28,7 +32,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.api = api_client
         self.theme_manager = ThemeManager()
-        self.setWindowTitle("CyberCafe Print & Service Manager")
+        self.setWindowTitle("ManAni Print & Service Manager")
         self.resize(1280, 820)
 
         container = QWidget()
@@ -39,7 +43,7 @@ class MainWindow(QMainWindow):
 
         header = QHBoxLayout()
         header.setSpacing(10)
-        title = QLabel("CyberCafe Print & Service Manager")
+        title = QLabel("ManAni Print & Service Manager")
         title.setObjectName("appTitle")
         subtitle = QLabel("POS Console")
         subtitle.setObjectName("secondaryLabel")
@@ -73,21 +77,22 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.setTabPosition(QTabWidget.West)
+        self.tabs.setIconSize(QSize(18, 18))
         root.addWidget(self.tabs)
 
         self.print_log_tab = self._build_print_log_tab()
-        self.tabs.addTab(self.print_log_tab, "Print Log")
+        self.tabs.addTab(self.print_log_tab, self._icon("printer.svg"), "Print Log")
 
         self.services_panel = ServicesPanel(self.api)
         self.services_panel.service_recorded.connect(self.refresh_all)
-        self.tabs.addTab(self.services_panel, "Services")
+        self.tabs.addTab(self.services_panel, self._icon("services.svg"), "Services")
 
         self.reports_panel = ReportsPanel(self.api)
-        self.tabs.addTab(self.reports_panel, "Reports")
+        self.tabs.addTab(self.reports_panel, self._icon("reports.svg"), "Reports")
 
         self.settings_panel = SettingsPanel(self.api)
         self.settings_panel.settings_saved.connect(self.refresh_all)
-        self.tabs.addTab(self.settings_panel, "Settings")
+        self.tabs.addTab(self.settings_panel, self._icon("settings.svg"), "Settings")
 
         self.statusBar().showMessage("Ready")
         self.apply_theme()
@@ -104,6 +109,11 @@ class MainWindow(QMainWindow):
         self.clock_timer.timeout.connect(self._update_clock)
         self.clock_timer.start()
         self._update_clock()
+        self.backup_timer = QTimer(self)
+        self.backup_timer.setInterval(60 * 60 * 1000)
+        self.backup_timer.timeout.connect(self.run_daily_backup)
+        self.backup_timer.start()
+        QTimer.singleShot(1200, self.run_daily_backup)
         QTimer.singleShot(1500, self.check_retention_notice)
 
     def _build_print_log_tab(self) -> QWidget:
@@ -129,13 +139,19 @@ class MainWindow(QMainWindow):
         controls.addStretch()
         layout.addLayout(controls)
 
-        self.print_log_table = QTableWidget(0, 6)
-        self.print_log_table.setHorizontalHeaderLabels(["Time", "Computer", "Printer", "Pages", "Print Type", "Cost"])
+        self.print_log_table = QTableWidget(0, 7)
+        self.print_log_table.setHorizontalHeaderLabels(
+            ["Time", "Computer", "Printer", "Pages", "Print Type", "Paper", "Cost"]
+        )
         self.print_log_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.print_log_table.verticalHeader().setDefaultSectionSize(34)
         self.print_log_table.setAlternatingRowColors(True)
         layout.addWidget(self.print_log_table)
         return tab
+
+    def _icon(self, filename: str) -> QIcon:
+        icon_path = ui_resource_path(os.path.join("ui", "icons", filename))
+        return QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
 
     def apply_theme(self) -> None:
         self.setStyleSheet(self.theme_manager.stylesheet())
@@ -190,12 +206,21 @@ class MainWindow(QMainWindow):
             self.print_log_table.setItem(idx, 2, QTableWidgetItem(item.get("printer_name", "")))
             self.print_log_table.setItem(idx, 3, QTableWidgetItem(str(item.get("pages", 0))))
             self.print_log_table.setItem(idx, 4, QTableWidgetItem(item.get("print_type", "")))
-            self.print_log_table.setItem(idx, 5, QTableWidgetItem(f"{currency} {item.get('total_cost', 0):.2f}"))
+            self.print_log_table.setItem(idx, 5, QTableWidgetItem(item.get("paper_size", "Unknown")))
+            self.print_log_table.setItem(idx, 6, QTableWidgetItem(format_currency(currency, item.get("total_cost", 0))))
 
         self.statusBar().showMessage(f"Loaded {len(rows)} print jobs for {day}")
 
     def _update_clock(self) -> None:
         self.clock_label.setText(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    def run_daily_backup(self) -> None:
+        try:
+            result = self.api.run_daily_backup(force=False)
+            if result.get("status") == "created":
+                self.statusBar().showMessage(f"Database backup created: {result.get('backup_path')}")
+        except Exception as exc:
+            self.statusBar().showMessage(f"Backup check failed: {exc}")
 
     def check_retention_notice(self) -> None:
         if self.retention_prompt_shown:

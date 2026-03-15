@@ -1,6 +1,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from ui.formatting import format_currency
+
 
 class StatCard(QFrame):
     def __init__(self, title: str, value: str = "0", accent: str = "blue") -> None:
@@ -54,4 +56,4 @@ class DashboardPanel(QWidget):
         self.bw_pages.set_value(str(payload.get("bw_pages", 0)))
         self.color_pages.set_value(str(payload.get("color_pages", 0)))
         self.total_services.set_value(str(payload.get("total_services", 0)))
-        self.total_revenue.set_value(f"{currency} {payload.get('total_revenue', 0):.2f}")
+        self.total_revenue.set_value(format_currency(currency, payload.get("total_revenue", 0)))

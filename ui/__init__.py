@@ -1,1 +1,1 @@
-# UI package for CyberCafe Print & Service Manager.
+# UI package for ManAni Print & Service Manager.

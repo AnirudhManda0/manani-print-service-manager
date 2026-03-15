@@ -12,12 +12,16 @@ dist/
 
 # Local databases
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 
 # Local environment and logs
 .env
 *.log
+logs/
+backup/
 
 # Platform/editor extras
 .DS_Store

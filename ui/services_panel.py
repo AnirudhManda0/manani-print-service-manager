@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.formatting import format_currency
+from ui.input_filters import disable_wheel_changes
+
 
 class AddServiceDialog(QDialog):
     def __init__(self, parent=None) -> None:
@@ -31,6 +34,7 @@ class AddServiceDialog(QDialog):
         self.price_input.setRange(0, 100000)
         self.price_input.setDecimals(2)
         self.price_input.setValue(100.0)
+        disable_wheel_changes(self.price_input)
 
         form.addRow("Service Name", self.name_input)
         form.addRow("Default Price", self.price_input)
@@ -108,7 +112,7 @@ class ServicesPanel(QWidget):
         self.service_buttons.clear()
 
         for i, service in enumerate(self.services):
-            btn = QPushButton(f"{service['service_name']}\n{self.currency} {service['default_price']:.2f}")
+            btn = QPushButton(f"{service['service_name']}\n{format_currency(self.currency, service['default_price'])}")
             btn.setMinimumHeight(96)
             btn.setMinimumWidth(210)
             btn.setObjectName("serviceActionButton")

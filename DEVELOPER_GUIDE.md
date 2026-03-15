@@ -1,98 +1,92 @@
-# Developer Guide
+# Developer Guide - ManAni Print & Service Manager
 
-This document explains the internal architecture of **CyberCafe Print & Service Manager** so new developers can quickly understand, maintain, and extend the project.
+This document explains internal architecture, module responsibilities, and extension points for the ManAni Print & Service Manager codebase.
 
-## 1. High-Level Architecture
+## 1. System Design
 
-The application is divided into five layers:
+The app is a local-first desktop system:
 
-1. `client` - Print monitoring and client forwarding logic
-2. `server` - API endpoints and data/business logic
-3. `database` - SQLite schema and initialization scripts
-4. `ui` - Desktop operator interface (PySide6)
-5. `config` - Runtime configuration
+`Print Monitor -> FastAPI -> SQLite -> PySide6 UI`
 
-Runtime flow:
+Components:
 
-`Windows Print Spooler -> client/print_monitor.py -> server/api.py -> server/database.py -> SQLite -> ui/*`
+- `client`: Windows spooler monitoring and job submission
+- `server`: API + database operations
+- `ui`: operator desktop interface
+- `database`: schema and initialization scripts
+- `config`: runtime app configuration
 
-## 2. File-by-File Overview
+## 2. Entry Point
 
-### `main.py`
+## `main.py`
 
-**Purpose**
-- Main application entrypoint.
-- Boots the system in `single`, `server`, or `client` mode.
-- Handles packaged-runtime resource resolution for PyInstaller builds.
+Purpose:
 
-**Why it exists**
-- Centralizes startup concerns (config loading, API server lifecycle, UI startup, monitor startup).
+- Loads runtime config and bundled resources
+- Starts API server in thread (single/server mode)
+- Starts print monitor where required
+- Launches PySide6 main window
+- Configures centralized logging (`logs/application.log`)
 
-**Interactions**
-- Imports `create_app` from `server/api.py`
-- Imports `PrintMonitor` from `client/print_monitor.py`
-- Imports UI classes through `ui/api_client.py` and `ui/main_window.py`
+Key functions:
 
-**Important functions**
-- `resource_path(relative_path) -> str`
-  - Returns resource file path in dev mode or bundled EXE mode.
-- `ensure_runtime_files() -> None`
-  - Ensures `config/settings.json` and `database/schema.sql` are available at runtime.
-- `load_config(config_path: Optional[str]) -> Dict[str, Any]`
-  - Loads JSON settings and returns configuration dictionary.
-- `wait_for_api(base_url, retries, delay) -> bool`
-  - Polls API health endpoint before UI/monitor interaction.
-- `run_single_mode(config) -> None`
-  - Runs API server + monitor + UI on one machine.
-- `run_server_mode(config, with_ui=True) -> None`
-  - Runs central API mode, optionally with UI.
-- `run_client_mode(config, server_url=None) -> None`
-  - Runs print monitor client that posts jobs to a central server.
-- `main() -> None`
-  - Parses args, selects runtime mode, and starts system.
+- `configure_logging()`: console + rotating file logging
+- `ensure_runtime_files()`: ensures `config/settings.json` and `database/schema.sql` exist
+- `run_single_mode(config)`: API + monitor + UI
+- `run_server_mode(config, with_ui)`: centralized server mode
+- `run_client_mode(config, server_url)`: client monitor-only mode
 
----
+## 3. Client Monitoring
 
-### `client/print_monitor.py`
+## `client/print_monitor.py`
 
-**Purpose**
-- Detects print jobs from Windows spooler and dispatches them to API.
+Purpose:
 
-**Why it exists**
-- Print capture is asynchronous and system-specific; this isolates Windows print integration.
+- Polls Windows spooler for all local/connected printers
+- Detects queued jobs and deduplicates seen jobs
+- Extracts metadata and posts to API
 
-**Interactions**
-- Uses `win32print` and `win32con` from `pywin32`.
-- Sends job payloads to `POST /api/print-jobs` via `requests`.
+Windows APIs used:
 
-**Important components**
-- `PrintMonitor` class
-  - `start()`, `stop()`: lifecycle controls
-  - `_list_printers()`: enumerates printers
-  - `_scan_printer(printer_name)`: reads jobs for a printer
-  - `_job_to_payload(...)`: normalizes job metadata to API payload
-  - `_send_to_api(payload)`: retries and sends to API
-- `run_background_client(server_url, poll_interval)`
-  - Runs monitor loop in standalone client mode.
+- `win32print.EnumPrinters`
+- `win32print.EnumJobs`
+- `win32print.GetJob`
 
-**Captured fields**
-- `computer_name`, `printer_name`, `document_name`, `pages`, `print_type`, `timestamp`
+Captured fields:
 
----
+- `computer_name`
+- `printer_name`
+- `document_name`
+- `pages`
+- `timestamp`
+- `print_type`
+- `paper_size`
 
-### `server/api.py`
+Important behavior:
 
-**Purpose**
-- Defines HTTP API endpoints and request/response behavior.
+- Poll interval default: `0.5s`
+- Debug logs for printer/job detection and parsed metadata
+- Color detection fallback from job DEVMODE -> printer DEVMODE -> monochrome-name fallback
+- Paper-size mapping to `A4/A3/Letter/Unknown`
 
-**Why it exists**
-- Separates transport concerns (HTTP, validation, error handling) from data logic.
+## `client/run_client.py`
 
-**Interactions**
-- Uses `Database` from `server/database.py`.
-- Uses request models from `server/models.py`.
+Purpose:
 
-**Important endpoints**
+- Lightweight CLI wrapper for remote monitor clients
+
+## 4. API Layer
+
+## `server/api.py`
+
+Purpose:
+
+- Exposes all desktop/API actions through FastAPI endpoints
+- Logs API request latency and status
+- Triggers periodic daily-backup checks
+
+Main endpoints:
+
 - `GET /health`
 - `GET/PUT /api/settings`
 - `POST/GET /api/print-jobs`
@@ -102,230 +96,176 @@ Runtime flow:
 - `GET /api/reports/{period}`
 - `GET /api/data-retention/status`
 - `POST /api/data-retention/execute`
+- `POST /api/backup/run`
 
----
+## `server/models.py`
 
-### `server/database.py`
+Purpose:
 
-**Purpose**
-- Owns all SQLite operations and business calculations.
+- Pydantic validation for requests
 
-**Why it exists**
-- Keeps pricing/report logic consistent across UI and API usage.
-- Provides thread-safe DB operations for concurrent UI/API/monitor activity.
+Important models:
 
-**Interactions**
-- Reads schema from `database/schema.sql`.
-- Called by `server/api.py`.
+- `PrintJobCreate` includes `paper_size`
+- `SettingsUpdate` includes retention + backup config
 
-**Important methods**
-- `initialize()`
-  - Applies schema and compatibility migrations.
-- `get_settings()`, `update_settings(...)`
-  - Reads/updates print pricing, currency, retention settings.
-- `add_print_job(...) -> Dict`
-  - Computes `price_per_page`, `total_cost` and inserts print job.
-- `list_print_jobs(limit, date_filter) -> List[Dict]`
-  - Returns recent logs (optionally day-filtered).
-- `add_service_catalog(...)`, `list_services_catalog()`
-  - Manages service types.
+## 5. Database Layer
+
+## `server/database.py`
+
+Purpose:
+
+- Thread-safe SQLite access using `RLock`
+- WAL mode and connection pragmas
+- Schema migration handling for existing databases
+- Billing logic, reports, retention, archive, backup
+
+Key design choices:
+
+- Money calculations use `Decimal` and 2-decimal quantization
+- Historical job records persist `price_per_page` and `total_cost`
+- Settings include backup and retention options
+- `run_daily_backup()` uses SQLite backup API for safe copies
+
+Primary methods:
+
+- `get_settings()` / `update_settings(...)`
+- `add_print_job(...)`
+- `list_print_jobs(...)`
+- `add_service_catalog(...)`
 - `record_service(...)`
-  - Inserts service transaction record.
-- `_revenue_between(start_ts, end_ts) -> Dict`
-  - Core aggregation (COUNT, SUM, AVG) for print/services metrics.
-- `get_dashboard(day) -> Dict`
-  - Daily dashboard summary.
-- `get_report(period, day) -> Dict`
-  - Daily/weekly/monthly summary + service breakdown.
-- `get_retention_status(days) -> Dict`
-  - Checks old-record counts before archive/delete actions.
-- `archive_old_records(days, archive_db_path=None) -> Dict`
-  - Moves old rows into archive DB.
-- `delete_old_records(days) -> Dict`
-  - Deletes old rows from primary DB.
+- `get_dashboard(day)`
+- `get_report(period, day)`
+- `archive_old_records(days)`
+- `delete_old_records(days)`
+- `run_daily_backup(force=False)`
 
----
+## 6. Database Schema
 
-### `server/models.py`
+## `database/schema.sql`
 
-**Purpose**
-- Pydantic request models for API validation.
+Tables:
 
-**Why it exists**
-- Prevents invalid payloads from reaching database layer.
-
-**Interactions**
-- Used by `server/api.py` endpoint function parameters.
-
-**Key models**
-- `PrintJobCreate`
-- `ServiceCatalogCreate`
-- `ServiceRecordCreate`
-- `SettingsUpdate`
-- `DataRetentionExecute`
-
----
-
-### `ui/main_window.py`
-
-**Purpose**
-- Main desktop shell and navigation controller.
-
-**Why it exists**
-- Coordinates panel composition, refresh behavior, theme switching, and top-level user interactions.
-
-**Interactions**
-- Uses `APIClient` to fetch/store data.
-- Embeds `DashboardPanel`, `ServicesPanel`, `ReportsPanel`, `SettingsPanel`.
-- Uses `ThemeManager` from `ui/theme.py`.
-
-**Important methods**
-- `_build_print_log_tab()`
-  - Builds print log table and date filter controls.
-- `apply_theme()`, `toggle_theme()`
-  - Global Light/Dark style switch.
-- `refresh_all()`
-  - Refreshes dashboard, log, and services state.
-- `load_dashboard(day)`, `load_print_jobs(day)`
-  - Reads API and updates UI widgets.
-- `check_retention_notice()`
-  - Prompts user when old data retention action is applicable.
-
----
-
-### `ui/dashboard.py`
-
-**Purpose**
-- Dashboard KPI card widgets.
-
-**Why it exists**
-- Isolates visual summary components from main window.
-
-**Interactions**
-- Receives payload from `MainWindow.load_dashboard()`.
-
-**Important classes**
-- `StatCard`
-- `DashboardPanel.update_metrics(payload)`
-
----
-
-### `ui/services_panel.py`
-
-**Purpose**
-- Service catalog UI and service transaction recording.
-
-**Why it exists**
-- Manual service billing is a major non-print revenue workflow.
-
-**Interactions**
-- Uses `APIClient` for listing services, adding services, recording service usage.
-- Emits `service_recorded` signal to refresh dashboard.
-
-**Important components**
-- `AddServiceDialog` (collects name and default price)
-- `ServicesPanel.refresh_services()`
-- `ServicesPanel.record_service(service)`
-
----
-
-### `ui/settings_panel.py`
-
-**Purpose**
-- Update pricing, currency, and retention policy.
-
-**Why it exists**
-- Central operator control surface for financial and data lifecycle settings.
-
-**Interactions**
-- Reads/writes via `APIClient.get_settings() / update_settings()`
-- Executes retention actions via `execute_retention()`
-
-**Important methods**
-- `load_settings()`
-- `save_settings()`
-- `run_retention()`
-
----
-
-### `ui/reports_panel.py`
-
-**Purpose**
-- Calendar-based reporting UI for daily/weekly/monthly summaries.
-
-**Why it exists**
-- Gives operators and owners a quick financial/operational view.
-
-**Interactions**
-- Calls `APIClient.get_report(period, day)` and renders summary + breakdown.
-
-**Important methods**
-- `load_report()`
-- `_render_report(report)`
-
----
-
-## 3. API Client Layer
-
-### `ui/api_client.py`
-
-**Purpose**
-- Thin wrapper around HTTP requests to backend API.
-
-**Why it exists**
-- Keeps widgets clean and reduces duplicate request code.
-
-**Important methods**
-- `get_dashboard`, `get_print_jobs`
-- `get_settings`, `update_settings`
-- `list_services`, `add_service`, `record_service`
-- `get_report`
-- `get_retention_status`, `execute_retention`
-
----
-
-## 4. Database/Schema Files
-
-### `database/schema.sql`
-
-Defines:
-- `print_jobs`
+- `print_jobs` (includes `print_type`, `paper_size`, `price_per_page`, `total_cost`, `timestamp`)
 - `services_catalog`
 - `service_records`
-- `settings`
+- `settings` (pricing, retention, backup)
 
-Also defines indexes for query performance and default settings seed values.
+Indexes:
 
-### `database/init_db.py`
+- `idx_print_jobs_timestamp`
+- `idx_service_records_timestamp`
+- `idx_service_records_service_id`
 
-Initializes database by instantiating `Database` class and applying schema/migrations.
+## `database/init_db.py`
 
----
+Purpose:
 
-## 5. Config and Packaging
+- Initializes DB file from schema and migration logic
 
-### `config/settings.json`
+Run with:
 
-Runtime configuration:
-- mode
-- API host/port
-- database path
-- print monitor behavior
-- central server URL
+```bash
+python database/init_db.py
+```
 
-### `CyberCafeManager.spec`
+## 7. UI Modules
 
-PyInstaller build specification:
-- bundles `database/schema.sql`
-- bundles `config/settings.json`
-- sets hidden imports for Qt and pywin32 modules
+## `ui/main_window.py`
 
----
+Purpose:
 
-## 6. Why This Design Works
+- Main shell with dashboard, print log, services, reports, settings
+- Theme toggle and periodic refresh
+- Daily backup trigger + retention notification
 
-- **Maintainability**: clear separation by runtime role (client/server/ui).
-- **Reliability**: thread-safe DB layer and WAL mode for high write frequency.
-- **Offline-first**: no cloud dependency required.
-- **Deployable**: supports both source execution and bundled EXE runtime.
-- **Extensible**: new reports/services/settings can be added with minimal impact across modules.
+## `ui/dashboard.py`
+
+Purpose:
+
+- Renders top KPI cards (print counts, B&W/color pages, services, revenue)
+
+## `ui/services_panel.py`
+
+Purpose:
+
+- Service catalog button grid and add-service dialog
+
+## `ui/settings_panel.py`
+
+Purpose:
+
+- Pricing, retention, and backup configuration
+- Manual retention and backup execution
+- Mouse-wheel protection on numeric inputs
+
+## `ui/reports_panel.py`
+
+Purpose:
+
+- Daily/weekly/monthly reporting
+- A3/A4 print counters and revenue summaries
+
+## `ui/theme.py`
+
+Purpose:
+
+- Light/Dark theme palette and global stylesheet
+
+## Supporting UI utilities
+
+- `ui/formatting.py`: stable currency formatting (`INR 0.00`)
+- `ui/input_filters.py`: wheel-event blocking for billing fields
+- `ui/resources.py`: packaged/development resource path resolution
+- `ui/icons/*.svg`: scalable icon assets
+
+## 8. Packaging
+
+## `CyberCafeManager.spec`
+
+Purpose:
+
+- PyInstaller spec for standalone Windows EXE
+- Bundles `database/schema.sql`, `config/settings.json`, and `ui/icons/*.svg`
+
+Build command:
+
+```bash
+pyinstaller CyberCafeManager.spec
+```
+
+## 9. Logging and Diagnostics
+
+Log file:
+
+- `logs/application.log`
+
+Covers:
+
+- printer detection and captured jobs
+- database writes
+- API request/response timing
+- retention/backup actions
+- errors and exceptions
+
+Enable debug mode:
+
+```powershell
+$env:MANANI_LOG_LEVEL = "DEBUG"
+python main.py
+```
+
+## 10. Safe Extension Guidelines
+
+When adding features:
+
+1. Preserve existing endpoint contracts where possible.
+2. Add migration-safe schema updates in `Database._migrate_schema()`.
+3. Keep money math in `Decimal`.
+4. Keep UI billing controls protected from accidental wheel input.
+5. Validate with:
+
+```bash
+python database/init_db.py
+python main.py
+```

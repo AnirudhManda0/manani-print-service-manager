@@ -7,6 +7,7 @@ project_root = Path(SPECPATH)
 datas = [
     ("database/schema.sql", "database"),
     ("config/settings.json", "config"),
+    ("ui/icons/*.svg", "ui/icons"),
 ]
 
 hiddenimports = [

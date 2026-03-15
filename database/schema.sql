@@ -1,4 +1,4 @@
--- Core schema for CyberCafe Print & Service Manager
+-- Core schema for ManAni Print & Service Manager
 
 CREATE TABLE IF NOT EXISTS print_jobs (
     id INTEGER PRIMARY KEY,
@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     document_name TEXT,
     pages INTEGER NOT NULL CHECK (pages >= 0),
     print_type TEXT NOT NULL CHECK (print_type IN ('black_and_white', 'color')),
+    paper_size TEXT NOT NULL DEFAULT 'Unknown',
     price_per_page REAL NOT NULL,
     total_cost REAL NOT NULL,
     timestamp DATETIME NOT NULL
@@ -32,7 +33,10 @@ CREATE TABLE IF NOT EXISTS settings (
     color_price_per_page REAL NOT NULL CHECK (color_price_per_page >= 0),
     currency TEXT NOT NULL,
     retention_mode TEXT NOT NULL DEFAULT 'retain_all',
-    retention_days INTEGER NOT NULL DEFAULT 30
+    retention_days INTEGER NOT NULL DEFAULT 30,
+    backup_enabled INTEGER NOT NULL DEFAULT 1,
+    backup_folder TEXT NOT NULL DEFAULT 'backup',
+    last_backup_date TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_print_jobs_timestamp ON print_jobs (timestamp);

@@ -6,6 +6,7 @@ import shutil
 import sys
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, Optional
 
 import requests
@@ -19,9 +20,31 @@ DEFAULT_CONFIG = {
     "mode": "single",
     "api": {"host": "127.0.0.1", "port": 8787},
     "database": {"path": "database/cybercafe.db"},
-    "print_monitor": {"enabled": True, "poll_interval_seconds": 1.2},
+    "print_monitor": {"enabled": True, "poll_interval_seconds": 0.5},
     "central_server_url": "http://127.0.0.1:8787",
 }
+
+
+def configure_logging() -> None:
+    logs_dir = os.path.join(install_root(), "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    log_file = os.path.join(logs_dir, "application.log")
+    level_name = os.environ.get("MANANI_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    root_logger.handlers.clear()
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    file_handler = RotatingFileHandler(log_file, maxBytes=2_000_000, backupCount=5, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
 
 
 def resource_path(relative_path):
@@ -162,7 +185,7 @@ def run_single_mode(config: Dict[str, Any]) -> None:
     if config.get("print_monitor", {}).get("enabled", True):
         monitor = PrintMonitor(
             api_base_url=api_url,
-            poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 1.2)),
+            poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 0.5)),
         )
         monitor.start()
 
@@ -190,7 +213,7 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
         if config.get("print_monitor", {}).get("enabled", True):
             monitor = PrintMonitor(
                 api_base_url=api_url,
-                poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 1.2)),
+                poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 0.5)),
             )
             monitor.start()
 
@@ -213,11 +236,11 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
 
 def run_client_mode(config: Dict[str, Any], server_url: Optional[str] = None) -> None:
     target = server_url or config.get("central_server_url", "http://127.0.0.1:8787")
-    run_background_client(target, poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 1.2)))
+    run_background_client(target, poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 0.5)))
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CyberCafe Print & Service Manager")
+    parser = argparse.ArgumentParser(description="ManAni Print & Service Manager")
     parser.add_argument("--mode", choices=["single", "server", "client"], default=None)
     parser.add_argument("--config", default=None, help="Path to settings.json")
     parser.add_argument("--headless", action="store_true", help="Server mode only: start API without desktop UI")
@@ -226,7 +249,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    configure_logging()
     args = parse_args()
     config = load_config(args.config)
     mode = args.mode or config.get("mode", "single")

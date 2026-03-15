@@ -1,16 +1,22 @@
 import os
+import time
+import logging
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Request
 
 from server.database import Database
 from server.models import DataRetentionExecute, PrintJobCreate, ServiceCatalogCreate, ServiceRecordCreate, SettingsUpdate
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(db_path: str, schema_path: str) -> FastAPI:
     db = Database(db_path=db_path, schema_path=schema_path)
-    app = FastAPI(title="CyberCafe Print & Service Manager API", version="1.0.0")
+    app = FastAPI(title="ManAni Print & Service Manager API", version="1.1.0")
+    backup_check_state = {"last_check": 0.0}
 
     app.add_middleware(
         CORSMiddleware,
@@ -19,6 +25,32 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def request_logger(request: Request, call_next):
+        start = time.perf_counter()
+        try:
+            now = time.time()
+            if now - backup_check_state["last_check"] > 300:
+                backup_check_state["last_check"] = now
+                try:
+                    db.run_daily_backup(force=False)
+                except Exception as backup_exc:
+                    logger.warning("Daily backup check failed: %s", backup_exc)
+            response = await call_next(request)
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "API %s %s -> %s (%.2f ms)",
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration_ms,
+            )
+            return response
+        except Exception:
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.exception("API %s %s failed (%.2f ms)", request.method, request.url.path, duration_ms)
+            raise
 
     @app.get("/health")
     def health() -> dict:
@@ -36,6 +68,8 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
             currency=payload.currency,
             retention_mode=payload.retention_mode,
             retention_days=payload.retention_days,
+            backup_enabled=payload.backup_enabled,
+            backup_folder=payload.backup_folder,
         )
 
     @app.post("/api/print-jobs")
@@ -46,6 +80,7 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
             document_name=payload.document_name,
             pages=payload.pages,
             print_type=payload.print_type,
+            paper_size=payload.paper_size,
             timestamp=payload.timestamp,
         )
 
@@ -98,6 +133,10 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
         if payload.mode == "delete_30_days":
             return db.delete_old_records(days=payload.days)
         raise HTTPException(status_code=400, detail="Unsupported retention mode")
+
+    @app.post("/api/backup/run")
+    def run_daily_backup(force: bool = Query(default=False)) -> dict:
+        return db.run_daily_backup(force=force)
 
     @app.on_event("shutdown")
     def _shutdown() -> None:

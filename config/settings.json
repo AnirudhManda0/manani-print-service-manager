@@ -9,7 +9,7 @@
   },
   "print_monitor": {
     "enabled": true,
-    "poll_interval_seconds": 1.2
+    "poll_interval_seconds": 0.5
   },
   "central_server_url": "http://127.0.0.1:8787"
 }

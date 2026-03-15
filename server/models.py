@@ -10,6 +10,7 @@ class PrintJobCreate(BaseModel):
     document_name: str = Field(default="", max_length=500)
     pages: int = Field(..., ge=0, le=100000)
     print_type: Literal["black_and_white", "color"] = "black_and_white"
+    paper_size: Literal["A4", "A3", "Letter", "Unknown"] = "Unknown"
     timestamp: Optional[datetime] = None
 
 
@@ -30,6 +31,8 @@ class SettingsUpdate(BaseModel):
     currency: str = Field(..., min_length=1, max_length=8)
     retention_mode: Literal["retain_all", "archive_30_days", "delete_30_days"] = "retain_all"
     retention_days: int = Field(default=30, ge=1, le=3650)
+    backup_enabled: bool = True
+    backup_folder: str = Field(default="backup", min_length=1, max_length=260)
 
 
 class DataRetentionExecute(BaseModel):
