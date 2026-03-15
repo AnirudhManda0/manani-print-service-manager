@@ -1,3 +1,15 @@
+"""Thread-safe SQLite data layer.
+
+This module owns:
+- schema initialization/migration
+- billing calculations (Decimal-based)
+- dashboard/report aggregation queries
+- retention/archive operations
+- daily backup creation
+
+API handlers call into this class; UI never accesses SQLite directly.
+"""
+
 import os
 import sqlite3
 import threading
@@ -64,6 +76,7 @@ class Database:
         return candidate or "backup"
 
     def _configure(self) -> None:
+        """Apply SQLite pragmas for reliability and concurrent read/write behavior."""
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL;")
             self._conn.execute("PRAGMA synchronous=NORMAL;")
@@ -71,6 +84,7 @@ class Database:
             self._conn.commit()
 
     def initialize(self) -> None:
+        """Load schema and apply backward-compatible migrations for existing databases."""
         with self._lock:
             with open(self.schema_path, "r", encoding="utf-8") as f:
                 self._conn.executescript(f.read())
@@ -125,6 +139,7 @@ class Database:
             self._conn.close()
 
     def get_settings(self) -> Dict[str, object]:
+        """Return normalized settings used by pricing, retention, and backup logic."""
         with self._lock:
             row = self._conn.execute(
                 """
@@ -175,6 +190,10 @@ class Database:
         backup_enabled: bool = True,
         backup_folder: str = "backup",
     ) -> Dict[str, object]:
+        """Persist settings updates from UI/API.
+
+        Prices are normalized to Decimal precision to keep billing deterministic.
+        """
         safe_mode = retention_mode if retention_mode in self.VALID_RETENTION_MODES else "retain_all"
         safe_days = max(1, int(retention_days))
         safe_currency = (currency.strip() or "INR").upper()
@@ -230,6 +249,13 @@ class Database:
         paper_size: str = "Unknown",
         timestamp: Optional[datetime] = None,
     ) -> Dict[str, object]:
+        """Insert one print job and compute immutable billing fields.
+
+        Billing flow:
+        - choose price per page based on print_type and current settings
+        - calculate total_cost with Decimal
+        - store price_per_page/total_cost with the job so history remains stable
+        """
         safe_pages = max(0, int(pages))
         safe_type = "color" if print_type == "color" else "black_and_white"
         safe_paper_size = self._normalize_paper_size(paper_size)
@@ -378,6 +404,7 @@ class Database:
         }
 
     def _revenue_between(self, start_ts: str, end_ts: str) -> Dict[str, float]:
+        """Aggregate print/service metrics for dashboard/report windows."""
         with self._lock:
             print_row = self._conn.execute(
                 """
@@ -479,6 +506,7 @@ class Database:
         return start_ts, end_ts, label
 
     def get_dashboard(self, day: Optional[str] = None) -> Dict[str, object]:
+        """Daily summary endpoint backing top dashboard cards."""
         start_ts, end_ts, label = self._range_from_period("daily", day)
         revenue = self._revenue_between(start_ts, end_ts)
         total = self._money(Decimal(str(revenue["printing_revenue"])) + Decimal(str(revenue["service_revenue"])))
@@ -491,6 +519,7 @@ class Database:
         }
 
     def get_report(self, period: str, day: Optional[str] = None) -> Dict[str, object]:
+        """Period report endpoint backing Reports tab."""
         start_ts, end_ts, label = self._range_from_period(period, day)
         revenue = self._revenue_between(start_ts, end_ts)
         services = self._service_breakdown_between(start_ts, end_ts)
@@ -573,6 +602,7 @@ class Database:
         )
 
     def archive_old_records(self, days: int = 30, archive_db_path: Optional[str] = None) -> Dict[str, object]:
+        """Move old data to archive database while preserving reporting continuity."""
         safe_days = max(1, int(days))
         cutoff = (datetime.now() - timedelta(days=safe_days)).strftime("%Y-%m-%d %H:%M:%S")
         archive_path = archive_db_path or os.path.join(os.path.dirname(self.db_path), "cybercafe_archive.db")
@@ -672,6 +702,7 @@ class Database:
         }
 
     def delete_old_records(self, days: int = 30) -> Dict[str, object]:
+        """Permanently delete records older than cutoff period."""
         safe_days = max(1, int(days))
         cutoff = (datetime.now() - timedelta(days=safe_days)).strftime("%Y-%m-%d %H:%M:%S")
         with self._lock:
@@ -707,6 +738,7 @@ class Database:
         return os.path.join(project_root, expanded)
 
     def run_daily_backup(self, force: bool = False) -> Dict[str, object]:
+        """Create a dated SQLite backup file once per day (or on force)."""
         with self._lock:
             settings = self.get_settings()
             if not settings.get("backup_enabled", True) and not force:

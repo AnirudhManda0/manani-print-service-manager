@@ -1,3 +1,12 @@
+"""Application entrypoint and runtime orchestrator.
+
+Responsibilities:
+- Configure logging
+- Resolve packaged/development resource paths
+- Ensure runtime folders/files exist
+- Start API server, print monitor, and desktop UI based on selected mode
+"""
+
 import argparse
 import json
 import logging
@@ -26,6 +35,7 @@ DEFAULT_CONFIG = {
 
 
 def configure_logging() -> None:
+    """Configure console + rotating file logs for production and packaged runtime."""
     logs_dir = os.path.join(install_root(), "logs")
     os.makedirs(logs_dir, exist_ok=True)
     log_file = os.path.join(logs_dir, "application.log")
@@ -48,20 +58,23 @@ def configure_logging() -> None:
 
 
 def resource_path(relative_path):
+    """Resolve data files from source tree (dev) or PyInstaller bundle (_MEIPASS)."""
     if getattr(sys, "frozen", False):
-        base_path = sys._MEIPASS
+        base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     else:
-        base_path = os.path.abspath(".")
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
 
 def install_root() -> str:
+    """Return writable runtime base folder (exe folder when frozen)."""
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 
 def bundled_root() -> str:
+    """Return bundle extraction path when frozen, else project root."""
     return getattr(sys, "_MEIPASS", install_root())
 
 
@@ -72,11 +85,17 @@ def _copy_if_missing(source: str, destination: str) -> None:
 
 
 def ensure_runtime_files() -> None:
+    """Create runtime folders and copy bundled defaults if missing.
+
+    This keeps the EXE portable: dropping the executable in any folder is enough.
+    """
     runtime = install_root()
     bundle = bundled_root()
 
     os.makedirs(os.path.join(runtime, "config"), exist_ok=True)
     os.makedirs(os.path.join(runtime, "database"), exist_ok=True)
+    os.makedirs(os.path.join(runtime, "logs"), exist_ok=True)
+    os.makedirs(os.path.join(runtime, "backup"), exist_ok=True)
 
     config_dst = os.path.join(runtime, "config", "settings.json")
     schema_dst = os.path.join(runtime, "database", "schema.sql")
@@ -95,6 +114,7 @@ def ensure_runtime_files() -> None:
 
 
 def resolve_runtime_path(configured_path: str) -> str:
+    """Resolve relative config paths against runtime root for portability."""
     expanded = os.path.expandvars(os.path.expanduser(configured_path))
     if os.path.isabs(expanded):
         return expanded
@@ -110,6 +130,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 
 class APIServerThread:
+    """Runs FastAPI/Uvicorn in a background thread so UI can stay responsive."""
     def __init__(self, db_path: str, schema_path: str, host: str, port: int) -> None:
         self.app = create_app(db_path=db_path, schema_path=schema_path)
         self.config = uvicorn.Config(
@@ -131,6 +152,7 @@ class APIServerThread:
 
 
 def wait_for_api(base_url: str, retries: int = 30, delay: float = 0.3) -> bool:
+    """Poll health endpoint until API is ready."""
     for _ in range(retries):
         try:
             if requests.get(f"{base_url}/health", timeout=1).status_code == 200:
@@ -142,6 +164,7 @@ def wait_for_api(base_url: str, retries: int = 30, delay: float = 0.3) -> bool:
 
 
 def run_with_ui(api_url: str, monitor: Optional[PrintMonitor] = None) -> None:
+    """Start Qt event loop and connect UI to API."""
     from PySide6.QtWidgets import QApplication
 
     from ui.api_client import APIClient
@@ -158,6 +181,7 @@ def run_with_ui(api_url: str, monitor: Optional[PrintMonitor] = None) -> None:
 
 
 def _runtime_paths(config: Dict[str, Any]) -> Dict[str, str]:
+    """Build concrete DB/schema paths for the current runtime environment."""
     return {
         "db_path": resolve_runtime_path(config.get("database", {}).get("path", "database/cybercafe.db")),
         "schema_path": resource_path("database/schema.sql"),
@@ -171,6 +195,7 @@ def _ui_api_url(host: str, port: int) -> str:
 
 
 def run_single_mode(config: Dict[str, Any]) -> None:
+    """Single-PC mode: API + monitor + UI all on one machine."""
     paths = _runtime_paths(config)
     host = config["api"]["host"]
     port = int(config["api"]["port"])
@@ -198,6 +223,7 @@ def run_single_mode(config: Dict[str, Any]) -> None:
 
 
 def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
+    """Central server mode with optional UI."""
     paths = _runtime_paths(config)
     host = config["api"]["host"]
     port = int(config["api"]["port"])
@@ -235,6 +261,7 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
 
 
 def run_client_mode(config: Dict[str, Any], server_url: Optional[str] = None) -> None:
+    """Client-only mode for remote PCs that only monitor printers and send jobs."""
     target = server_url or config.get("central_server_url", "http://127.0.0.1:8787")
     run_background_client(target, poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 0.5)))
 
@@ -249,6 +276,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Parse CLI args and dispatch the selected run mode."""
     configure_logging()
     args = parse_args()
     config = load_config(args.config)

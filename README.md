@@ -1,184 +1,183 @@
 # ManAni Print & Service Manager
 
-ManAni Print & Service Manager is an offline-first Windows desktop POS-style application for cyber cafes and print shops.
-It captures print jobs automatically, records manual services, calculates billing, and produces revenue reports.
+ManAni Print & Service Manager is a Windows desktop application for cyber cafes and print shops.
+It combines print-job capture, service billing, reporting, and backup into one offline-capable workflow.
 
-## Core Capabilities
+## Required Software and Dependencies
 
-- Automatic print capture from Windows Print Spooler (`win32print.EnumPrinters`, `EnumJobs`, `GetJob`)
-- Color/B&W detection with fallback handling
-- Paper-size detection (`A4`, `A3`, `Letter`, `Unknown`)
-- Decimal-based price calculations for fractional pricing (for example `0.50` per page)
-- Service catalog with one-click service recording
-- Dashboard + print log + daily/weekly/monthly reports
-- Data retention controls (retain, archive, delete)
-- Daily automatic SQLite backup to `backup/cybercafe_YYYY_MM_DD.db`
-- Light/Dark operator-friendly UI theme
-- Single-PC mode and centralized multi-PC mode
+Install the following on a development machine:
 
-## Architecture
+- Python 3.10+
+- Git
+- PyInstaller
+- Printer drivers for the printers used in the shop
 
-Data flow:
+Required Python libraries (installed through `requirements.txt`):
 
-`Printer -> Windows Spooler -> client/print_monitor.py -> server/api.py -> server/database.py -> SQLite -> UI`
+- PySide6
+- FastAPI
+- uvicorn
+- requests
+- pywin32
+- pydantic
 
-Key modules:
+Install command:
 
-- `client/print_monitor.py`: spooler polling and job metadata extraction
-- `server/api.py`: FastAPI endpoints, request logging, backup trigger checks
-- `server/database.py`: thread-safe SQLite operations, Decimal billing, reports, archiving, backup
-- `ui/*`: POS desktop interface (dashboard, services, settings, reports)
-
-## Project Structure
-
-```text
-manani-print-manager/
-  client/
-  server/
-  ui/
-  database/
-  config/
-  docs/
-  main.py
-  requirements.txt
-  README.md
-  INSTALLATION_GUIDE.md
-  DEVELOPER_GUIDE.md
-  LICENSE
-  .gitignore
-  CyberCafeManager.spec
+```bash
+pip install -r requirements.txt
 ```
 
-## Installation (Source)
+## Development Setup
 
-1. Install Python and add it to PATH.
-2. Clone repository:
+1. Clone repository:
 
 ```bash
 git clone https://github.com/AnirudhManda0/manani-print-service-manager.git
 cd manani-print-service-manager
 ```
 
-3. Install dependencies:
+2. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Initialize database:
+3. Initialize database:
 
 ```bash
 python database/init_db.py
 ```
 
-5. Run app:
+4. Run application:
 
 ```bash
 python main.py
 ```
 
+## Project Architecture
+
+Data flow:
+
+`Windows Printer -> Print Spooler -> client/print_monitor.py -> server/api.py -> server/database.py -> SQLite -> UI`
+
+Main modules:
+
+- `main.py`: runtime bootstrap, logging, mode selection, UI/API launch
+- `client/print_monitor.py`: spooler polling and print metadata capture
+- `server/api.py`: FastAPI routes for UI and monitor clients
+- `server/database.py`: billing logic, reporting queries, retention, backups
+- `ui/*`: operator interface (dashboard, services, settings, reports)
+
 ## Runtime Modes
 
-### Single PC
+Single computer mode:
 
 ```bash
 python main.py --mode single
 ```
 
-### Central Server
+Central server mode:
 
 ```bash
 python main.py --mode server
 python main.py --mode server --headless
 ```
 
-### Client Monitor (Remote PCs)
+Client monitor mode:
 
 ```bash
 python main.py --mode client --server-url http://<SERVER_IP>:8787
 ```
 
-or
+or:
 
 ```bash
 python client/run_client.py --server-url http://<SERVER_IP>:8787 --poll-interval 0.5
 ```
 
-## Printer Setup
+## Build Instructions
 
-1. Install printer drivers.
-2. Confirm printers appear in `Devices and Printers`.
-3. Ensure `Print Spooler` service is running (`services.msc`).
-4. Print a test document.
-5. Verify log entry in Print Log tab with:
-   - printer name
-   - document name
-   - pages
-   - print type
-   - paper size
-   - timestamp
-
-## Settings and Billing
-
-In **Settings**:
-
-- Configure B&W and color price per page (supports fractional values)
-- Configure currency code (displayed as `INR 0.00` style)
-- Configure retention mode and days
-- Configure daily backup enable/disable and backup folder
-- Run retention/backup manually when needed
-
-Historical records keep original `price_per_page` and `total_cost`.
-
-## Backup and Data Safety
-
-- SQLite WAL mode is enabled for stability.
-- Daily backup is generated automatically when enabled.
-- Manual backup can be triggered from Settings.
-- Main DB: `database/cybercafe.db`
-- Backup files: `backup/cybercafe_YYYY_MM_DD.db`
-
-## Build Standalone EXE
+Generate portable EXE:
 
 ```bash
 pyinstaller CyberCafeManager.spec
 ```
 
-Output:
+Build output:
 
 - `dist/CyberCafeManager.exe`
 
-## Basic Verification Procedure
+This EXE is packaged with Python runtime and dependencies, so it can run on Windows 10/11 systems even when Python is not installed.
 
-1. Start app (`python main.py`).
-2. Add service and record it once.
-3. Print test document.
-4. Confirm dashboard and report values update.
-5. Confirm backup file appears in configured backup folder.
+## Portable Distribution
+
+Portable file to distribute:
+
+- `dist/CyberCafeManager.exe`
+
+At first launch, the EXE auto-creates runtime folders next to itself:
+
+- `config/`
+- `database/`
+- `logs/`
+- `backup/`
+
+## How to Share the Software
+
+Share this file:
+
+- `dist/CyberCafeManager.exe`
+
+Recommended sharing methods:
+
+- USB drive
+- Google Drive
+- GitHub release
+- Email attachment
+
+Example portable folder structure:
+
+```text
+CyberCafeManager/
+  CyberCafeManager.exe
+```
+
+End users only need to double-click `CyberCafeManager.exe`.
+
+## Features
+
+- Automatic print capture using Windows spooler APIs
+- B&W and color billing with Decimal precision
+- Paper-size capture (`A4`, `A3`, `Letter`, `Unknown`)
+- Service catalog and one-click service recording
+- Daily/weekly/monthly reports
+- Data retention actions (retain/archive/delete)
+- Daily automatic SQLite backup
+- Light/Dark desktop UI theme
 
 ## Troubleshooting
 
-### Printer not detected
+Printer not detected:
 
-- Recheck printer driver and spooler service.
-- Verify monitor mode is running.
-- Enable debug logs using `MANANI_LOG_LEVEL=DEBUG`.
+- Verify printer driver installation.
+- Verify Print Spooler service is running.
+- Verify monitor mode is active and API is reachable.
 
-### Port already in use
+Port already in use:
 
-- Another app instance is likely running on API port `8787`.
-- Close duplicate instance or change API port in `config/settings.json`.
+- Close existing running app instance or change port in `config/settings.json`.
 
-### Database busy/locked
+Database busy/locked:
 
-- Avoid editing DB in external tools during runtime.
-- Keep one server writer in centralized mode.
+- Avoid editing DB externally while app is running.
+- Keep one central writer in multi-PC mode.
 
-## Documentation
+Enable debug logs:
 
-- Setup and operator deployment: `INSTALLATION_GUIDE.md`
-- Internal architecture: `DEVELOPER_GUIDE.md`
-- Operator manual: `docs/CyberCafeManager_Documentation.docx`
+```powershell
+$env:MANANI_LOG_LEVEL = "DEBUG"
+python main.py
+```
 
 ## License
 

@@ -1,3 +1,9 @@
+"""Settings panel for pricing, retention, and backup behavior.
+
+The UI reads settings from the FastAPI layer and writes updates back through APIClient.
+This keeps business logic on the server/database side and keeps the panel focused on operator input.
+"""
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -17,6 +23,12 @@ from ui.input_filters import disable_wheel_changes
 
 
 class SettingsPanel(QWidget):
+    """Operator-facing settings form.
+
+    Data flow:
+    UI widgets -> API client -> FastAPI endpoint -> database settings table.
+    """
+
     settings_saved = Signal()
 
     def __init__(self, api_client) -> None:
@@ -29,6 +41,7 @@ class SettingsPanel(QWidget):
         layout.addWidget(title)
 
         form = QFormLayout()
+        # Pricing controls use spin boxes with wheel protection to avoid accidental billing edits.
         self.bw_price = QDoubleSpinBox()
         self.bw_price.setRange(0, 100000)
         self.bw_price.setDecimals(2)
@@ -37,8 +50,12 @@ class SettingsPanel(QWidget):
         self.color_price.setRange(0, 100000)
         self.color_price.setDecimals(2)
         disable_wheel_changes(self.color_price)
-        self.currency = QLineEdit()
-        self.currency.setMaxLength(8)
+
+        # Editable combo allows both selecting common currencies and manual custom codes.
+        self.currency = QComboBox()
+        self.currency.setEditable(True)
+        self.currency.addItems(["INR", "USD", "EUR", "GBP"])
+        self.currency.setInsertPolicy(QComboBox.NoInsert)
 
         self.retention_mode = QComboBox()
         self.retention_mode.addItem("Retain All Records", "retain_all")
@@ -87,11 +104,17 @@ class SettingsPanel(QWidget):
         self.load_settings()
 
     def load_settings(self) -> None:
+        """Pull current settings from API and populate the form."""
         try:
             data = self.api.get_settings()
             self.bw_price.setValue(float(data.get("bw_price_per_page", 2.0)))
             self.color_price.setValue(float(data.get("color_price_per_page", 10.0)))
-            self.currency.setText(str(data.get("currency", "INR")))
+            currency = str(data.get("currency", "INR"))
+            index = self.currency.findText(currency)
+            if index >= 0:
+                self.currency.setCurrentIndex(index)
+            else:
+                self.currency.setCurrentText(currency)
             mode = data.get("retention_mode", "retain_all")
             idx = self.retention_mode.findData(mode)
             self.retention_mode.setCurrentIndex(idx if idx >= 0 else 0)
@@ -104,11 +127,12 @@ class SettingsPanel(QWidget):
             QMessageBox.warning(self, "Settings Error", f"Unable to load settings.\n{exc}")
 
     def save_settings(self) -> None:
+        """Submit settings edits to API and notify parent windows to refresh summaries."""
         try:
             self.api.update_settings(
                 bw_price_per_page=float(self.bw_price.value()),
                 color_price_per_page=float(self.color_price.value()),
-                currency=self.currency.text().strip() or "INR",
+                currency=self.currency.currentText().strip() or "INR",
                 retention_mode=str(self.retention_mode.currentData()),
                 retention_days=int(self.retention_days.value()),
                 backup_enabled=bool(self.backup_enabled.currentData()),
@@ -120,6 +144,7 @@ class SettingsPanel(QWidget):
             QMessageBox.warning(self, "Settings Error", f"Unable to save settings.\n{exc}")
 
     def run_retention(self) -> None:
+        """Allow operators to run archive/delete logic immediately instead of waiting for prompts."""
         mode = str(self.retention_mode.currentData())
         days = int(self.retention_days.value())
         if mode == "retain_all":
@@ -147,6 +172,7 @@ class SettingsPanel(QWidget):
             QMessageBox.warning(self, "Retention Error", f"Unable to run retention action.\n{exc}")
 
     def run_backup_now(self) -> None:
+        """Force an immediate backup through API to verify backup configuration quickly."""
         try:
             result = self.api.run_daily_backup(force=True)
             QMessageBox.information(self, "Backup Complete", str(result))

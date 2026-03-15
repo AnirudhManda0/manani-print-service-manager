@@ -1,3 +1,8 @@
+"""Dashboard UI cards for daily shop KPIs.
+
+The panel is presentation-only. Values come from `/api/dashboard` via MainWindow.
+"""
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -5,6 +10,8 @@ from ui.formatting import format_currency
 
 
 class StatCard(QFrame):
+    """Reusable card widget used for each dashboard metric."""
+
     def __init__(self, title: str, value: str = "0", accent: str = "blue") -> None:
         super().__init__()
         self.setFrameShape(QFrame.StyledPanel)
@@ -32,6 +39,8 @@ class StatCard(QFrame):
 
 
 class DashboardPanel(QWidget):
+    """Top summary panel for print/service/revenue totals."""
+
     def __init__(self) -> None:
         super().__init__()
         layout = QGridLayout(self)
@@ -51,6 +60,7 @@ class DashboardPanel(QWidget):
         layout.addWidget(self.total_revenue, 1, 0, 1, 4)
 
     def update_metrics(self, payload: dict) -> None:
+        """Maps dashboard API payload to visible KPI cards."""
         currency = payload.get("currency", "INR")
         self.total_prints.set_value(str(payload.get("total_print_jobs", 0)))
         self.bw_pages.set_value(str(payload.get("bw_pages", 0)))

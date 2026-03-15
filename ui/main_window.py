@@ -1,9 +1,21 @@
+"""Main desktop shell for ManAni Print & Service Manager.
+
+This window orchestrates:
+- Dashboard metrics from API
+- Print log table
+- Service / Report / Settings panels
+- Theme, clock, retention prompt, and scheduled backup checks
+
+UI widgets never write directly to SQLite; all data flows through API client calls.
+"""
+
 import os
 from datetime import datetime
 
 from PySide6.QtCore import QDate, QSize, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QComboBox,
     QDateEdit,
     QHBoxLayout,
     QHeaderView,
@@ -11,6 +23,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -28,19 +41,29 @@ from ui.theme import ThemeManager
 
 
 class MainWindow(QMainWindow):
+    """Primary operator window.
+
+    Data flow:
+    - Pulls data from FastAPI via APIClient
+    - Displays metrics/logs in widgets
+    - Sends user actions (settings/services/retention/backup) back to API
+    """
+
     def __init__(self, api_client):
         super().__init__()
         self.api = api_client
         self.theme_manager = ThemeManager()
         self.setWindowTitle("ManAni Print & Service Manager")
         self.resize(1280, 820)
+        self.setMinimumSize(1100, 700)
 
         container = QWidget()
         self.setCentralWidget(container)
         root = QVBoxLayout(container)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(14, 14, 14, 10)
+        root.setSpacing(12)
 
+        # Top ribbon: app title, dashboard date selector, theme toggle, and live clock.
         header = QHBoxLayout()
         header.setSpacing(10)
         title = QLabel("ManAni Print & Service Manager")
@@ -71,28 +94,30 @@ class MainWindow(QMainWindow):
         header.addWidget(self.clock_label)
         root.addLayout(header)
 
+        # Dashboard cards are wrapped in a scroll area for smaller displays.
         self.dashboard = DashboardPanel()
-        root.addWidget(self.dashboard)
+        root.addWidget(self._wrap_scroll(self.dashboard), 0)
 
+        # Main content area uses tabbed pages.
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.setTabPosition(QTabWidget.West)
         self.tabs.setIconSize(QSize(18, 18))
-        root.addWidget(self.tabs)
+        root.addWidget(self.tabs, 1)
 
         self.print_log_tab = self._build_print_log_tab()
         self.tabs.addTab(self.print_log_tab, self._icon("printer.svg"), "Print Log")
 
         self.services_panel = ServicesPanel(self.api)
         self.services_panel.service_recorded.connect(self.refresh_all)
-        self.tabs.addTab(self.services_panel, self._icon("services.svg"), "Services")
+        self.tabs.addTab(self._wrap_scroll(self.services_panel), self._icon("services.svg"), "Services")
 
         self.reports_panel = ReportsPanel(self.api)
-        self.tabs.addTab(self.reports_panel, self._icon("reports.svg"), "Reports")
+        self.tabs.addTab(self._wrap_scroll(self.reports_panel), self._icon("reports.svg"), "Reports")
 
         self.settings_panel = SettingsPanel(self.api)
         self.settings_panel.settings_saved.connect(self.refresh_all)
-        self.tabs.addTab(self.settings_panel, self._icon("settings.svg"), "Settings")
+        self.tabs.addTab(self._wrap_scroll(self.settings_panel), self._icon("settings.svg"), "Settings")
 
         self.statusBar().showMessage("Ready")
         self.apply_theme()
@@ -116,12 +141,21 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1200, self.run_daily_backup)
         QTimer.singleShot(1500, self.check_retention_notice)
 
+    @staticmethod
+    def _wrap_scroll(widget: QWidget) -> QScrollArea:
+        """Wraps long content panels in a vertical scroll area."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(widget)
+        return scroll
+
     def _build_print_log_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
+        # Filter controls support both dropdown selection and manual text entry.
         controls = QHBoxLayout()
         label = QLabel("Date")
         self.log_date = QDateEdit()
@@ -129,12 +163,28 @@ class MainWindow(QMainWindow):
         self.log_date.setDate(QDate.currentDate())
         self.log_date.dateChanged.connect(self.load_print_jobs)
 
+        print_type_label = QLabel("Print Type")
+        self.print_type_filter = QComboBox()
+        self.print_type_filter.setEditable(True)
+        self.print_type_filter.addItems(["All", "black_and_white", "color"])
+        self.print_type_filter.currentTextChanged.connect(self.load_print_jobs)
+
+        paper_label = QLabel("Paper Size")
+        self.paper_size_filter = QComboBox()
+        self.paper_size_filter.setEditable(True)
+        self.paper_size_filter.addItems(["All", "A4", "A3", "Letter", "Unknown"])
+        self.paper_size_filter.currentTextChanged.connect(self.load_print_jobs)
+
         self.refresh_log_btn = QPushButton("Refresh")
         self.refresh_log_btn.setProperty("variant", "primary")
         self.refresh_log_btn.clicked.connect(self.load_print_jobs)
 
         controls.addWidget(label)
         controls.addWidget(self.log_date)
+        controls.addWidget(print_type_label)
+        controls.addWidget(self.print_type_filter)
+        controls.addWidget(paper_label)
+        controls.addWidget(self.paper_size_filter)
         controls.addWidget(self.refresh_log_btn)
         controls.addStretch()
         layout.addLayout(controls)
@@ -185,6 +235,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Dashboard refresh failed: {exc}")
 
     def load_print_jobs(self, *_args) -> None:
+        """Load print rows from API and apply local UI filters."""
         day = self.log_date.date().toString("yyyy-MM-dd")
         try:
             rows = self.api.get_print_jobs(day=day, limit=500)
@@ -198,6 +249,13 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         currency = settings.get("currency", "INR")
+
+        selected_print_type = self.print_type_filter.currentText().strip().lower()
+        selected_paper = self.paper_size_filter.currentText().strip().lower()
+        if selected_print_type and selected_print_type != "all":
+            rows = [r for r in rows if str(r.get("print_type", "")).strip().lower() == selected_print_type]
+        if selected_paper and selected_paper != "all":
+            rows = [r for r in rows if str(r.get("paper_size", "")).strip().lower() == selected_paper]
 
         self.print_log_table.setRowCount(len(rows))
         for idx, item in enumerate(rows):

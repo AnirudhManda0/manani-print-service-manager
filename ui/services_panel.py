@@ -1,3 +1,9 @@
+"""Services panel for one-click service billing.
+
+Operators manage a service catalog and record service sales.
+All persistence is handled by API calls, not direct DB writes from UI.
+"""
+
 from datetime import datetime
 
 from PySide6.QtCore import Signal
@@ -21,6 +27,8 @@ from ui.input_filters import disable_wheel_changes
 
 
 class AddServiceDialog(QDialog):
+    """Small form dialog to add a new service template to the catalog."""
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Add Service")
@@ -54,6 +62,8 @@ class AddServiceDialog(QDialog):
 
 
 class ServicesPanel(QWidget):
+    """Renders service buttons and records service activity through API."""
+
     service_recorded = Signal()
 
     def __init__(self, api_client) -> None:
@@ -99,6 +109,7 @@ class ServicesPanel(QWidget):
         self.refresh_services()
 
     def refresh_services(self) -> None:
+        """Reload services and rebuild button grid from current catalog data."""
         try:
             self.services = self.api.list_services()
             settings = self.api.get_settings()
@@ -128,6 +139,7 @@ class ServicesPanel(QWidget):
             self.status_label.setText(f"{len(self.services)} services loaded")
 
     def open_add_dialog(self) -> None:
+        """Collect new service input and submit it to API."""
         dialog = AddServiceDialog(self)
         if dialog.exec() != QDialog.Accepted:
             return
@@ -142,6 +154,7 @@ class ServicesPanel(QWidget):
             QMessageBox.warning(self, "Add Service Error", str(exc))
 
     def record_service(self, service: dict) -> None:
+        """Record one service action and notify parent dashboard to refresh totals."""
         try:
             self.api.record_service(service_id=service["id"])
             self.status_label.setText(

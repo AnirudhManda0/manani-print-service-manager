@@ -1,6 +1,7 @@
 # Python bytecode/cache
 __pycache__/
 **/__pycache__/
+**pycache**/
 *.pyc
 *.pyo
 *.pyd
@@ -12,6 +13,7 @@ dist/
 
 # Local databases
 *.db
+database/*.db
 *.db-wal
 *.db-shm
 *.sqlite

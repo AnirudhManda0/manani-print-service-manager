@@ -1,3 +1,9 @@
+"""FastAPI service layer for ManAni Print & Service Manager.
+
+The desktop UI talks only to this API client/server boundary.
+All persistence and business rules are delegated to server.database.Database.
+"""
+
 import os
 import time
 import logging
@@ -14,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_app(db_path: str, schema_path: str) -> FastAPI:
+    """Create configured FastAPI app bound to one Database instance."""
     db = Database(db_path=db_path, schema_path=schema_path)
     app = FastAPI(title="ManAni Print & Service Manager API", version="1.1.0")
     backup_check_state = {"last_check": 0.0}
@@ -28,6 +35,7 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
 
     @app.middleware("http")
     async def request_logger(request: Request, call_next):
+        # API middleware centralizes request timing logs and periodic backup checks.
         start = time.perf_counter()
         try:
             now = time.time()
@@ -62,6 +70,7 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
 
     @app.put("/api/settings")
     def update_settings(payload: SettingsUpdate) -> dict:
+        # Settings affect pricing, retention, and backup behavior used by billing/reporting.
         return db.update_settings(
             bw_price_per_page=payload.bw_price_per_page,
             color_price_per_page=payload.color_price_per_page,
@@ -74,6 +83,7 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
 
     @app.post("/api/print-jobs")
     def add_print_job(payload: PrintJobCreate) -> dict:
+        # Print monitor pushes captured spooler jobs here.
         return db.add_print_job(
             computer_name=payload.computer_name,
             printer_name=payload.printer_name,
@@ -93,6 +103,7 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
 
     @app.get("/api/dashboard")
     def get_dashboard(date: Optional[str] = Query(default=None, description="YYYY-MM-DD")) -> dict:
+        # Dashboard is a daily summary view; UI updates cards from this payload.
         return db.get_dashboard(day=date)
 
     @app.get("/api/services/catalog")
@@ -115,6 +126,7 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
 
     @app.get("/api/reports/{period}")
     def get_report(period: str, date: Optional[str] = Query(default=None, description="YYYY-MM-DD")) -> dict:
+        # Reporting endpoint backs daily/weekly/monthly report screen.
         if period not in {"daily", "weekly", "monthly"}:
             raise HTTPException(status_code=400, detail="period must be daily, weekly, or monthly")
         try:
@@ -136,6 +148,7 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
 
     @app.post("/api/backup/run")
     def run_daily_backup(force: bool = Query(default=False)) -> dict:
+        # Manual trigger used by Settings panel and background periodic checks.
         return db.run_daily_backup(force=force)
 
     @app.on_event("shutdown")

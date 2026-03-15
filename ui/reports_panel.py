@@ -1,3 +1,8 @@
+"""Reporting panel for daily/weekly/monthly business summaries.
+
+Report payloads are retrieved from `/api/reports/{period}` and rendered for operators.
+"""
+
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QComboBox,
@@ -20,6 +25,8 @@ from ui.formatting import format_currency
 
 
 class ReportStat(QFrame):
+    """Compact stat tile used in report summary header."""
+
     def __init__(self, title: str) -> None:
         super().__init__()
         self.setObjectName("reportStat")
@@ -39,6 +46,8 @@ class ReportStat(QFrame):
 
 
 class ReportsPanel(QWidget):
+    """Shows report filters, summary metrics, and service revenue table."""
+
     def __init__(self, api_client) -> None:
         super().__init__()
         self.api = api_client
@@ -107,6 +116,7 @@ class ReportsPanel(QWidget):
         self.load_report()
 
     def load_report(self) -> None:
+        """Fetch selected period report from API and render it."""
         period = self.period_combo.currentText()
         day = self.date_edit.date().toString("yyyy-MM-dd")
         try:
@@ -117,6 +127,7 @@ class ReportsPanel(QWidget):
             QMessageBox.warning(self, "Report Error", f"Could not generate report.\n{exc}")
 
     def _render_report(self, report: dict) -> None:
+        """Convert report response into user-facing text, cards, and breakdown rows."""
         summary = report["summary"]
         currency = report.get("currency", "INR")
 

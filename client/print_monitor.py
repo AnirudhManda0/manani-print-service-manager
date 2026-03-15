@@ -1,3 +1,11 @@
+"""Windows print spooler monitor.
+
+This client polls printer queues, extracts metadata, and sends jobs to FastAPI.
+It is used in:
+- single mode (same PC as API/UI)
+- centralized mode (remote client PCs posting to central server)
+"""
+
 import json
 import logging
 import os
@@ -65,6 +73,7 @@ class PrintMonitor:
         logger.info("Print monitor stopped")
 
     def _run(self) -> None:
+        # Poll all printers at a short interval to avoid missing short-lived spooler jobs.
         while not self._stop_event.is_set():
             try:
                 printers = self._list_printers()
@@ -76,11 +85,13 @@ class PrintMonitor:
             self._stop_event.wait(self.poll_interval)
 
     def _list_printers(self):
+        """Enumerate local and connected printers (includes virtual printers)."""
         flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
         printers = win32print.EnumPrinters(flags)
         return [p[2] for p in printers if len(p) > 2]
 
     def _scan_printer(self, printer_name: str) -> None:
+        """Read queued jobs from one printer and emit unseen jobs."""
         handle = None
         try:
             handle = win32print.OpenPrinter(printer_name)
@@ -122,6 +133,7 @@ class PrintMonitor:
             self._seen_jobs.discard(old)
 
     def _detect_print_type(self, job_info: Dict[str, object], printer_info: Dict[str, object]) -> str:
+        """Infer print type with fallback chain: job devmode -> printer devmode -> name hint."""
         def _color_from_devmode(dev_mode) -> Optional[str]:
             if dev_mode is None:
                 return None
@@ -152,6 +164,7 @@ class PrintMonitor:
 
     @staticmethod
     def _paper_size_label(paper_size_value: Optional[int]) -> str:
+        """Map DEVMODE paper size integer to friendly values used in reports."""
         if paper_size_value is None:
             return "Unknown"
         mapping = {
@@ -168,6 +181,10 @@ class PrintMonitor:
         printer_info: Dict[str, object],
         job: Dict[str, object],
     ) -> Dict[str, object]:
+        """Convert raw spooler job to API payload.
+
+        Billing is not calculated here; only metadata capture happens in monitor.
+        """
         pages = int(job.get("TotalPages", 0) or 0)
         if pages <= 0:
             pages = int(job.get("PagesPrinted", 0) or 0)
@@ -197,6 +214,7 @@ class PrintMonitor:
         }
 
     def _dispatch(self, payload: Dict[str, object]) -> None:
+        """Deliver jobs either to API (normal path) or callback (local test path)."""
         if self.api_base_url:
             self._send_to_api(payload)
             return
@@ -204,6 +222,7 @@ class PrintMonitor:
             self.on_job(payload)
 
     def _send_to_api(self, payload: Dict[str, object]) -> None:
+        """POST captured print job to API with small retry window."""
         url = f"{self.api_base_url}/api/print-jobs"
         for attempt in range(3):
             try:
@@ -223,6 +242,7 @@ class PrintMonitor:
 
 
 def run_background_client(server_url: str, poll_interval: float = 0.5) -> None:
+    """Run monitor loop for standalone client deployment."""
     level_name = os.environ.get("MANANI_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     logging.basicConfig(
