@@ -25,8 +25,42 @@ class APIClient:
         response.raise_for_status()
         return response.json()
 
+    def _delete(self, path: str) -> dict:
+        response = requests.delete(f"{self.base_url}{path}", timeout=self.timeout)
+        response.raise_for_status()
+        return response.json()
+
     def health(self) -> dict:
         return self._get("/health")
+
+    def get_version(self) -> dict:
+        return self._get("/api/version")
+
+    def get_system_config(self) -> dict:
+        return self._get("/api/system-config")
+
+    def update_system_config(
+        self,
+        server_ip: str,
+        server_port: int,
+        computer_name: str,
+        operator_id: str,
+        poll_interval: float,
+        bw_price_per_page: float,
+        color_price_per_page: float,
+    ) -> dict:
+        return self._put(
+            "/api/system-config",
+            {
+                "server_ip": server_ip,
+                "server_port": server_port,
+                "computer_name": computer_name,
+                "operator_id": operator_id,
+                "poll_interval": poll_interval,
+                "bw_price_per_page": bw_price_per_page,
+                "color_price_per_page": color_price_per_page,
+            },
+        )
 
     def get_dashboard(self, day: Optional[str] = None) -> dict:
         return self._get("/api/dashboard", params={"date": day} if day else None)
@@ -36,6 +70,9 @@ class APIClient:
         if day:
             params["date"] = day
         return self._get("/api/print-jobs", params=params)["items"]
+
+    def delete_print_job(self, job_id: int) -> dict:
+        return self._delete(f"/api/print-jobs/{int(job_id)}")
 
     def get_settings(self) -> dict:
         return self._get("/api/settings")

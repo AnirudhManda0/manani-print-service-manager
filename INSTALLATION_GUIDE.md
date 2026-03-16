@@ -5,7 +5,7 @@ This guide is for technicians and shop owners to install, configure, and validat
 ## 1. Requirements
 
 - Windows machine with printer drivers installed
-- Python (for source deployment) or packaged EXE (for operator deployment)
+- Python 3.9 (for source deployment) or packaged EXE (for operator deployment)
 - Network only required for multi-PC client/server mode
 
 ## 2. Source Installation
@@ -37,14 +37,17 @@ python main.py
 
 ## 3. EXE Installation
 
-1. Build executable:
+1. Build executables:
 
 ```bash
-pyinstaller CyberCafeManager.spec
+pyinstaller --onefile --name CyberCafeManager main.py
+pyinstaller CyberCafeServer.spec
+pyinstaller CyberCafeClient.spec
 ```
 
-2. Copy `dist/CyberCafeManager.exe` to target PC.
-3. Run executable directly.
+2. Copy `dist/CyberCafeServer.exe` to admin PC.
+3. Copy `dist/CyberCafeClient.exe` to each client PC.
+4. Run executable directly.
 
 The app creates runtime folders/files automatically if missing:
 
@@ -52,11 +55,17 @@ The app creates runtime folders/files automatically if missing:
 - `database/schema.sql`
 - `database/cybercafe.db`
 - `logs/application.log`
+- `version.txt`
 
 ## 4. First-Time Configuration
 
 Open **Settings** and configure:
 
+- Server IP
+- Server Port
+- Computer Name
+- Operator ID
+- Polling interval
 - B&W price per page
 - Color price per page
 - Currency code
@@ -85,25 +94,25 @@ Virtual printers (for example Microsoft Print to PDF) are also polled by the mon
 ### Central Server PC
 
 ```bash
-python main.py --mode server
+python main.py --mode server --config config/settings.json
 ```
 
 (or headless)
 
 ```bash
-python main.py --mode server --headless
+python main.py --mode server --headless --config config/settings.json
 ```
 
 ### Client PCs
 
 ```bash
-python main.py --mode client --server-url http://<SERVER_IP>:8787
+python main.py --mode client --config config/settings.json
 ```
 
 or:
 
 ```bash
-python client/run_client.py --server-url http://<SERVER_IP>:8787 --poll-interval 0.5
+python client/run_client.py --config config/settings.json
 ```
 
 Validate that print jobs from client PCs appear on the server dashboard/log.
@@ -120,19 +129,29 @@ Restore process:
 2. Replace `database/cybercafe.db` with a selected backup file copy.
 3. Start application.
 
-## 8. Post-Install Validation Checklist
+## 8. Safe Update Procedure
+
+1. Stop server/client applications.
+2. Run backup or copy `database/cybercafe.db`.
+3. Replace executable with newer version.
+4. Keep existing `config/settings.json` and `database/` files.
+5. Start the application.
+
+## 9. Post-Install Validation Checklist
 
 - [ ] App starts without crash
 - [ ] Dashboard loads
 - [ ] Settings save successfully
 - [ ] Numeric fields do not change by mouse-wheel scroll
 - [ ] Service record can be added from UI
-- [ ] Test print appears in print log
+- [ ] Test print appears in print log with correct page count
+- [ ] Dashboard revenue reflects printed pages (for example 18 pages x 2 INR = 36 INR)
 - [ ] Report shows B&W/Color and A3/A4 values
+- [ ] Add Service expression input works (for example `10 * 2` stores `20`)
 - [ ] Daily backup file is created
 - [ ] `logs/application.log` is being written
 
-## 9. Diagnostics and Support
+## 10. Diagnostics and Support
 
 - Set debug logs when troubleshooting:
 

@@ -3,9 +3,9 @@
 Report payloads are retrieved from `/api/reports/{period}` and rendered for operators.
 """
 
-from PySide6.QtCore import QDate
-from PySide6.QtWidgets import (
+from ui.qt import (
     QComboBox,
+    QDate,
     QDateEdit,
     QFrame,
     QFormLayout,

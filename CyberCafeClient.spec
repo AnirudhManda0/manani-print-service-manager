@@ -7,23 +7,16 @@ project_root = Path(SPECPATH)
 datas = [
     ("database/schema.sql", "database"),
     ("config/settings.json", "config"),
-    ("ui/icons/*.svg", "ui/icons"),
     ("version.txt", "."),
 ]
 
 hiddenimports = [
-    "PySide2.QtCore",
-    "PySide2.QtGui",
-    "PySide2.QtWidgets",
-    "PySide6.QtCore",
-    "PySide6.QtGui",
-    "PySide6.QtWidgets",
     "win32print",
     "win32con",
 ]
 
 a = Analysis(
-    ["main.py"],
+    ["launch_client.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
@@ -43,14 +36,14 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="CyberCafeManager",
+    name="CyberCafeClient",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

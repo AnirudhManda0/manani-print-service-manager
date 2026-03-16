@@ -12,21 +12,24 @@ UI widgets never write directly to SQLite; all data flows through API client cal
 import os
 from datetime import datetime
 
-from PySide6.QtCore import QDate, QSize, QTimer
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (
+from ui.qt import (
     QComboBox,
+    Qt,
     QDateEdit,
+    QDate,
     QHBoxLayout,
     QHeaderView,
+    QIcon,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSize,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QTimer,
     QVBoxLayout,
     QWidget,
 )
@@ -49,11 +52,12 @@ class MainWindow(QMainWindow):
     - Sends user actions (settings/services/retention/backup) back to API
     """
 
-    def __init__(self, api_client):
+    def __init__(self, api_client, app_version: str = "1.0.0"):
         super().__init__()
         self.api = api_client
+        self.app_version = app_version
         self.theme_manager = ThemeManager()
-        self.setWindowTitle("ManAni Print & Service Manager")
+        self.setWindowTitle(f"ManAni Print & Service Manager v{self.app_version}")
         self.resize(1280, 820)
         self.setMinimumSize(1100, 700)
 
@@ -70,6 +74,8 @@ class MainWindow(QMainWindow):
         title.setObjectName("appTitle")
         subtitle = QLabel("POS Console")
         subtitle.setObjectName("secondaryLabel")
+        version_label = QLabel(f"v{self.app_version}")
+        version_label.setObjectName("secondaryLabel")
         dash_date_label = QLabel("Dashboard Date")
         dash_date_label.setObjectName("secondaryLabel")
         self.dashboard_date = QDateEdit()
@@ -86,6 +92,8 @@ class MainWindow(QMainWindow):
         header.addWidget(title)
         header.addSpacing(8)
         header.addWidget(subtitle)
+        header.addSpacing(6)
+        header.addWidget(version_label)
         header.addStretch()
         header.addWidget(dash_date_label)
         header.addWidget(self.dashboard_date)
@@ -189,13 +197,25 @@ class MainWindow(QMainWindow):
         controls.addStretch()
         layout.addLayout(controls)
 
-        self.print_log_table = QTableWidget(0, 7)
+        self.print_log_table = QTableWidget(0, 10)
         self.print_log_table.setHorizontalHeaderLabels(
-            ["Time", "Computer", "Printer", "Pages", "Print Type", "Paper", "Cost"]
+            ["Time", "Operator", "Computer", "Printer", "Pages", "Document", "Print Type", "Paper", "Cost", "Delete"]
         )
-        self.print_log_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.print_log_table.verticalHeader().setDefaultSectionSize(34)
+        header = self.print_log_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.Stretch)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(9, QHeaderView.Fixed)
+        self.print_log_table.setColumnWidth(9, 80)
+        self.print_log_table.verticalHeader().setDefaultSectionSize(42)
         self.print_log_table.setAlternatingRowColors(True)
+        self.print_log_table.setWordWrap(False)
         layout.addWidget(self.print_log_table)
         return tab
 
@@ -259,15 +279,49 @@ class MainWindow(QMainWindow):
 
         self.print_log_table.setRowCount(len(rows))
         for idx, item in enumerate(rows):
+            job_id = int(item.get("id", 0))
             self.print_log_table.setItem(idx, 0, QTableWidgetItem(item.get("timestamp", "")))
-            self.print_log_table.setItem(idx, 1, QTableWidgetItem(item.get("computer_name", "")))
-            self.print_log_table.setItem(idx, 2, QTableWidgetItem(item.get("printer_name", "")))
-            self.print_log_table.setItem(idx, 3, QTableWidgetItem(str(item.get("pages", 0))))
-            self.print_log_table.setItem(idx, 4, QTableWidgetItem(item.get("print_type", "")))
-            self.print_log_table.setItem(idx, 5, QTableWidgetItem(item.get("paper_size", "Unknown")))
-            self.print_log_table.setItem(idx, 6, QTableWidgetItem(format_currency(currency, item.get("total_cost", 0))))
+            self.print_log_table.setItem(idx, 1, QTableWidgetItem(item.get("operator_id", "ADMIN")))
+            self.print_log_table.setItem(idx, 2, QTableWidgetItem(item.get("computer_name", "")))
+            self.print_log_table.setItem(idx, 3, QTableWidgetItem(item.get("printer_name", "")))
+            self.print_log_table.setItem(idx, 4, QTableWidgetItem(str(item.get("pages", 0))))
+            self.print_log_table.setItem(idx, 5, QTableWidgetItem(item.get("document_name", "")))
+            self.print_log_table.setItem(idx, 6, QTableWidgetItem(item.get("print_type", "")))
+            self.print_log_table.setItem(idx, 7, QTableWidgetItem(item.get("paper_size", "Unknown")))
+            self.print_log_table.setItem(idx, 8, QTableWidgetItem(format_currency(currency, item.get("total_cost", 0))))
+            delete_btn = QPushButton("Delete")
+            delete_btn.setObjectName("tableDeleteButton")
+            delete_btn.setFixedSize(66, 26)
+            delete_btn.clicked.connect(lambda _checked=False, j=job_id: self.delete_print_job(j))
+            delete_container = QWidget()
+            delete_layout = QHBoxLayout(delete_container)
+            delete_layout.setContentsMargins(0, 0, 0, 0)
+            delete_layout.setAlignment(Qt.AlignCenter)
+            delete_layout.addWidget(delete_btn)
+            self.print_log_table.setCellWidget(idx, 9, delete_container)
+
+            for col in (0, 1, 2, 3, 4, 5, 6, 7, 8):
+                cell = self.print_log_table.item(idx, col)
+                if cell is not None:
+                    cell.setTextAlignment(Qt.AlignVCenter | (Qt.AlignCenter if col in {4, 8} else Qt.AlignLeft))
 
         self.statusBar().showMessage(f"Loaded {len(rows)} print jobs for {day}")
+
+    def delete_print_job(self, job_id: int) -> None:
+        confirm = QMessageBox.question(
+            self,
+            "Delete Transaction",
+            f"Delete print transaction ID {job_id}?",
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        try:
+            self.api.delete_print_job(job_id)
+            self.load_print_jobs()
+            self.load_dashboard()
+            self.statusBar().showMessage(f"Deleted print transaction ID {job_id}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Delete Error", f"Unable to delete transaction.\n{exc}")
 
     def _update_clock(self) -> None:
         self.clock_label.setText(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

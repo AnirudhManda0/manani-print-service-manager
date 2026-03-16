@@ -151,6 +151,15 @@ class ThemeManager:
             font-weight: 700;
             padding: 10px;
         }}
+        QPushButton#tableDeleteButton {{
+            min-height: 24px;
+            max-height: 26px;
+            min-width: 58px;
+            max-width: 66px;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-size: 12px;
+        }}
 
         QLineEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComboBox, QTextEdit {{
             background: {t.card_background};

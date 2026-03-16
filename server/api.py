@@ -13,17 +13,47 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 
+from runtime_config import load_config_file, save_config_file
 from server.database import Database
-from server.models import DataRetentionExecute, PrintJobCreate, ServiceCatalogCreate, ServiceRecordCreate, SettingsUpdate
+from server.models import (
+    DataRetentionExecute,
+    PrintJobCreate,
+    ServiceCatalogCreate,
+    ServiceRecordCreate,
+    SettingsUpdate,
+    SystemConfigUpdate,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(db_path: str, schema_path: str) -> FastAPI:
+def create_app(
+    db_path: str,
+    schema_path: str,
+    config_path: Optional[str] = None,
+    app_version: str = "1.0.0",
+) -> FastAPI:
     """Create configured FastAPI app bound to one Database instance."""
     db = Database(db_path=db_path, schema_path=schema_path)
-    app = FastAPI(title="ManAni Print & Service Manager API", version="1.1.0")
+    app = FastAPI(title="ManAni Print & Service Manager API", version=app_version)
     backup_check_state = {"last_check": 0.0}
+    cfg_path = config_path or os.path.join(os.path.dirname(os.path.dirname(db_path)), "config", "settings.json")
+
+    # Keep pricing in sync with runtime config defaults for first-run and portable deployments.
+    try:
+        runtime_cfg = load_config_file(cfg_path)
+        current = db.get_settings()
+        db.update_settings(
+            bw_price_per_page=float(runtime_cfg.get("bw_price_per_page", current.get("bw_price_per_page", 2.0))),
+            color_price_per_page=float(runtime_cfg.get("color_price_per_page", current.get("color_price_per_page", 10.0))),
+            currency=str(current.get("currency", "INR")),
+            retention_mode=str(current.get("retention_mode", "retain_all")),
+            retention_days=int(current.get("retention_days", 30)),
+            backup_enabled=bool(current.get("backup_enabled", True)),
+            backup_folder=str(current.get("backup_folder", "backup")),
+        )
+    except Exception as config_exc:
+        logger.warning("Could not sync runtime config pricing to DB settings: %s", config_exc)
 
     app.add_middleware(
         CORSMiddleware,
@@ -62,7 +92,49 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok"}
+        return {"status": "ok", "version": app_version}
+
+    @app.get("/api/version")
+    def get_version() -> dict:
+        return {"version": app_version}
+
+    @app.get("/api/system-config")
+    def get_system_config() -> dict:
+        cfg = load_config_file(cfg_path)
+        return {
+            "server_ip": cfg.get("server_ip", "127.0.0.1"),
+            "server_port": int(cfg.get("server_port", 8787)),
+            "computer_name": cfg.get("computer_name", ""),
+            "operator_id": cfg.get("operator_id", "ADMIN"),
+            "poll_interval": float(cfg.get("poll_interval", 0.5)),
+            "bw_price_per_page": float(cfg.get("bw_price_per_page", 2.0)),
+            "color_price_per_page": float(cfg.get("color_price_per_page", 10.0)),
+        }
+
+    @app.put("/api/system-config")
+    def update_system_config(payload: SystemConfigUpdate) -> dict:
+        cfg = load_config_file(cfg_path)
+        cfg.update(
+            {
+                "server_ip": payload.server_ip.strip(),
+                "server_port": int(payload.server_port),
+                "computer_name": payload.computer_name.strip() or cfg.get("computer_name", ""),
+                "operator_id": payload.operator_id.strip() or cfg.get("operator_id", "ADMIN"),
+                "poll_interval": float(payload.poll_interval),
+                "bw_price_per_page": float(payload.bw_price_per_page),
+                "color_price_per_page": float(payload.color_price_per_page),
+            }
+        )
+        saved = save_config_file(cfg_path, cfg)
+        return {
+            "server_ip": saved.get("server_ip"),
+            "server_port": int(saved.get("server_port", 8787)),
+            "computer_name": saved.get("computer_name"),
+            "operator_id": saved.get("operator_id", "ADMIN"),
+            "poll_interval": float(saved.get("poll_interval", 0.5)),
+            "bw_price_per_page": float(saved.get("bw_price_per_page", 2.0)),
+            "color_price_per_page": float(saved.get("color_price_per_page", 10.0)),
+        }
 
     @app.get("/api/settings")
     def get_settings() -> dict:
@@ -71,7 +143,7 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
     @app.put("/api/settings")
     def update_settings(payload: SettingsUpdate) -> dict:
         # Settings affect pricing, retention, and backup behavior used by billing/reporting.
-        return db.update_settings(
+        result = db.update_settings(
             bw_price_per_page=payload.bw_price_per_page,
             color_price_per_page=payload.color_price_per_page,
             currency=payload.currency,
@@ -80,11 +152,20 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
             backup_enabled=payload.backup_enabled,
             backup_folder=payload.backup_folder,
         )
+        try:
+            cfg = load_config_file(cfg_path)
+            cfg["bw_price_per_page"] = float(payload.bw_price_per_page)
+            cfg["color_price_per_page"] = float(payload.color_price_per_page)
+            save_config_file(cfg_path, cfg)
+        except Exception as exc:
+            logger.warning("Could not persist pricing to settings.json: %s", exc)
+        return result
 
     @app.post("/api/print-jobs")
     def add_print_job(payload: PrintJobCreate) -> dict:
         # Print monitor pushes captured spooler jobs here.
         return db.add_print_job(
+            operator_id=payload.operator_id,
             computer_name=payload.computer_name,
             printer_name=payload.printer_name,
             document_name=payload.document_name,
@@ -100,6 +181,13 @@ def create_app(db_path: str, schema_path: str) -> FastAPI:
         limit: int = Query(default=300, ge=1, le=5000),
     ) -> dict:
         return {"items": db.list_print_jobs(limit=limit, date_filter=date)}
+
+    @app.delete("/api/print-jobs/{job_id}")
+    def delete_print_job(job_id: int) -> dict:
+        deleted = db.delete_print_job(job_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"print job {job_id} not found")
+        return {"deleted": True, "id": job_id}
 
     @app.get("/api/dashboard")
     def get_dashboard(date: Optional[str] = Query(default=None, description="YYYY-MM-DD")) -> dict:
@@ -162,8 +250,15 @@ if __name__ == "__main__":
     import uvicorn
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    version_path = os.path.join(root, "version.txt")
+    version = "1.0.0"
+    if os.path.exists(version_path):
+        with open(version_path, "r", encoding="utf-8") as handle:
+            version = handle.read().strip() or version
     app = create_app(
         db_path=os.path.join(root, "database", "cybercafe.db"),
         schema_path=os.path.join(root, "database", "schema.sql"),
+        config_path=os.path.join(root, "config", "settings.json"),
+        app_version=version,
     )
     uvicorn.run(app, host="0.0.0.0", port=8787)

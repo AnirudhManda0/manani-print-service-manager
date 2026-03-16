@@ -4,8 +4,7 @@ The UI reads settings from the FastAPI layer and writes updates back through API
 This keeps business logic on the server/database side and keeps the panel focused on operator input.
 """
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
+from ui.qt import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -15,6 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
+    Signal,
     QVBoxLayout,
     QWidget,
 )
@@ -41,6 +41,18 @@ class SettingsPanel(QWidget):
         layout.addWidget(title)
 
         form = QFormLayout()
+        self.server_ip = QLineEdit()
+        self.server_port = QSpinBox()
+        self.server_port.setRange(1, 65535)
+        disable_wheel_changes(self.server_port)
+        self.computer_name = QLineEdit()
+        self.operator_id = QLineEdit()
+        self.poll_interval = QDoubleSpinBox()
+        self.poll_interval.setRange(0.1, 10.0)
+        self.poll_interval.setDecimals(2)
+        self.poll_interval.setSingleStep(0.1)
+        disable_wheel_changes(self.poll_interval)
+
         # Pricing controls use spin boxes with wheel protection to avoid accidental billing edits.
         self.bw_price = QDoubleSpinBox()
         self.bw_price.setRange(0, 100000)
@@ -74,6 +86,11 @@ class SettingsPanel(QWidget):
         self.backup_folder = QLineEdit()
         self.backup_folder.setText("backup")
 
+        form.addRow("Server IP", self.server_ip)
+        form.addRow("Server Port", self.server_port)
+        form.addRow("Computer Name", self.computer_name)
+        form.addRow("Operator ID", self.operator_id)
+        form.addRow("Polling Interval (sec)", self.poll_interval)
         form.addRow("B&W Price Per Page", self.bw_price)
         form.addRow("Color Price Per Page", self.color_price)
         form.addRow("Currency", self.currency)
@@ -106,7 +123,13 @@ class SettingsPanel(QWidget):
     def load_settings(self) -> None:
         """Pull current settings from API and populate the form."""
         try:
+            system_data = self.api.get_system_config()
             data = self.api.get_settings()
+            self.server_ip.setText(str(system_data.get("server_ip", "127.0.0.1")))
+            self.server_port.setValue(int(system_data.get("server_port", 8787)))
+            self.computer_name.setText(str(system_data.get("computer_name", "")))
+            self.operator_id.setText(str(system_data.get("operator_id", "ADMIN")))
+            self.poll_interval.setValue(float(system_data.get("poll_interval", 0.5)))
             self.bw_price.setValue(float(data.get("bw_price_per_page", 2.0)))
             self.color_price.setValue(float(data.get("color_price_per_page", 10.0)))
             currency = str(data.get("currency", "INR"))
@@ -129,6 +152,16 @@ class SettingsPanel(QWidget):
     def save_settings(self) -> None:
         """Submit settings edits to API and notify parent windows to refresh summaries."""
         try:
+            previous = self.api.get_system_config()
+            self.api.update_system_config(
+                server_ip=self.server_ip.text().strip(),
+                server_port=int(self.server_port.value()),
+                computer_name=self.computer_name.text().strip(),
+                operator_id=self.operator_id.text().strip() or "ADMIN",
+                poll_interval=float(self.poll_interval.value()),
+                bw_price_per_page=float(self.bw_price.value()),
+                color_price_per_page=float(self.color_price.value()),
+            )
             self.api.update_settings(
                 bw_price_per_page=float(self.bw_price.value()),
                 color_price_per_page=float(self.color_price.value()),
@@ -138,7 +171,14 @@ class SettingsPanel(QWidget):
                 backup_enabled=bool(self.backup_enabled.currentData()),
                 backup_folder=self.backup_folder.text().strip() or "backup",
             )
-            QMessageBox.information(self, "Saved", "Settings updated successfully.")
+            restart_needed = (
+                str(previous.get("server_ip", "")).strip() != self.server_ip.text().strip()
+                or int(previous.get("server_port", 8787)) != int(self.server_port.value())
+            )
+            message = "Settings updated successfully."
+            if restart_needed:
+                message += "\nRestart the application to apply new server IP/port."
+            QMessageBox.information(self, "Saved", message)
             self.settings_saved.emit()
         except Exception as exc:
             QMessageBox.warning(self, "Settings Error", f"Unable to save settings.\n{exc}")

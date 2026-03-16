@@ -109,8 +109,19 @@ class Database:
             self._conn.execute("ALTER TABLE settings ADD COLUMN last_backup_date TEXT NOT NULL DEFAULT '';")
 
         print_columns = self._table_columns("print_jobs")
+        if "operator_id" not in print_columns:
+            self._conn.execute("ALTER TABLE print_jobs ADD COLUMN operator_id TEXT NOT NULL DEFAULT 'ADMIN';")
         if "paper_size" not in print_columns:
             self._conn.execute("ALTER TABLE print_jobs ADD COLUMN paper_size TEXT NOT NULL DEFAULT 'Unknown';")
+        self._conn.execute(
+            """
+            UPDATE print_jobs
+            SET
+                pages = 1,
+                total_cost = ROUND(COALESCE(price_per_page, 0), 2)
+            WHERE pages IS NULL OR pages <= 0;
+            """
+        )
 
         self._conn.execute(
             """
@@ -128,6 +139,22 @@ class Database:
             VALUES (1, 2.0, 10.0, 'INR', 'retain_all', 30, 1, 'backup', '');
             """
         )
+
+        default_services = [
+            ("PAN Card", 120.0),
+            ("Exam Registration", 80.0),
+            ("Scanning", 20.0),
+            ("Lamination", 30.0),
+            ("Photo Printing", 50.0),
+        ]
+        for service_name, default_price in default_services:
+            self._conn.execute(
+                """
+                INSERT OR IGNORE INTO services_catalog (service_name, default_price)
+                VALUES (?, ?);
+                """,
+                (service_name, float(default_price)),
+            )
 
     @staticmethod
     def _to_db_time(value: Optional[datetime]) -> str:
@@ -241,6 +268,7 @@ class Database:
 
     def add_print_job(
         self,
+        operator_id: str,
         computer_name: str,
         printer_name: str,
         document_name: str,
@@ -256,9 +284,10 @@ class Database:
         - calculate total_cost with Decimal
         - store price_per_page/total_cost with the job so history remains stable
         """
-        safe_pages = max(0, int(pages))
+        safe_pages = max(1, int(pages))
         safe_type = "color" if print_type == "color" else "black_and_white"
         safe_paper_size = self._normalize_paper_size(paper_size)
+        safe_operator = (str(operator_id or "ADMIN").strip() or "ADMIN")[:120]
         settings = self.get_settings()
         price_per_page = (
             self._money(settings["color_price_per_page"])
@@ -272,10 +301,11 @@ class Database:
             cursor = self._conn.execute(
                 """
                 INSERT INTO print_jobs
-                (computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                (operator_id, computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
+                    safe_operator,
                     computer_name,
                     printer_name,
                     document_name,
@@ -291,8 +321,9 @@ class Database:
             job_id = cursor.lastrowid
 
         logger.info(
-            "Print job captured: id=%s computer=%s printer=%s pages=%s type=%s paper=%s total=%s",
+            "Print job captured: id=%s operator=%s computer=%s printer=%s pages=%s type=%s paper=%s total=%s",
             job_id,
+            safe_operator,
             computer_name,
             printer_name,
             safe_pages,
@@ -302,6 +333,7 @@ class Database:
         )
         return {
             "id": job_id,
+            "operator_id": safe_operator,
             "computer_name": computer_name,
             "printer_name": printer_name,
             "document_name": document_name,
@@ -317,6 +349,7 @@ class Database:
         sql = """
             SELECT
                 id,
+                operator_id,
                 computer_name,
                 printer_name,
                 document_name,
@@ -340,6 +373,16 @@ class Database:
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    def delete_print_job(self, job_id: int) -> bool:
+        """Delete one print transaction by id."""
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM print_jobs WHERE id = ?;", (int(job_id),))
+            self._conn.commit()
+            deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info("Print job deleted: id=%s", job_id)
+        return deleted
 
     def add_service_catalog(self, service_name: str, default_price: float) -> Dict[str, object]:
         safe_price = self._money(default_price)
@@ -568,6 +611,7 @@ class Database:
             """
             CREATE TABLE IF NOT EXISTS archive_db.print_jobs (
                 id INTEGER PRIMARY KEY,
+                operator_id TEXT NOT NULL DEFAULT 'ADMIN',
                 computer_name TEXT NOT NULL,
                 printer_name TEXT NOT NULL,
                 document_name TEXT,
@@ -600,6 +644,14 @@ class Database:
             CREATE INDEX IF NOT EXISTS archive_db.idx_service_records_service_id ON service_records (service_id);
             """
         )
+        archive_columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA archive_db.table_info(print_jobs);").fetchall()
+        }
+        if "operator_id" not in archive_columns:
+            self._conn.execute(
+                "ALTER TABLE archive_db.print_jobs ADD COLUMN operator_id TEXT NOT NULL DEFAULT 'ADMIN';"
+            )
 
     def archive_old_records(self, days: int = 30, archive_db_path: Optional[str] = None) -> Dict[str, object]:
         """Move old data to archive database while preserving reporting continuity."""
@@ -650,10 +702,10 @@ class Database:
                 self._conn.execute(
                     """
                     INSERT OR IGNORE INTO archive_db.print_jobs (
-                        id, computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp
+                        id, operator_id, computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp
                     )
                     SELECT
-                        id, computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp
+                        id, operator_id, computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp
                     FROM print_jobs
                     WHERE timestamp < ?;
                     """,

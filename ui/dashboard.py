@@ -3,8 +3,7 @@
 The panel is presentation-only. Values come from `/api/dashboard` via MainWindow.
 """
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from ui.qt import Qt, QFrame, QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ui.formatting import format_currency
 
@@ -45,7 +44,10 @@ class DashboardPanel(QWidget):
         super().__init__()
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(12)
+        for col in range(4):
+            layout.setColumnStretch(col, 1)
 
         self.total_prints = StatCard("Total Prints Today", accent="blue")
         self.bw_pages = StatCard("B&W Pages", accent="cyan")

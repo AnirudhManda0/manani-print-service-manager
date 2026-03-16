@@ -1,5 +1,4 @@
-from PySide6.QtCore import QEvent, QObject
-from PySide6.QtWidgets import QAbstractScrollArea
+from ui.qt import QAbstractScrollArea, QEvent, QObject
 
 
 class IgnoreWheelEventFilter(QObject):

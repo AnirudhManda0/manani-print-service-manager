@@ -6,7 +6,7 @@ This document explains internal architecture, module responsibilities, and exten
 
 The app is a local-first desktop system:
 
-`Print Monitor -> FastAPI -> SQLite -> PySide6 UI`
+`Print Monitor -> FastAPI -> SQLite -> Qt UI (PySide2/PySide6 compatibility layer)`
 
 Components:
 
@@ -15,6 +15,7 @@ Components:
 - `ui`: operator desktop interface
 - `database`: schema and initialization scripts
 - `config`: runtime app configuration
+- `runtime_config.py`: normalized load/save for `config/settings.json`
 
 ## 2. Entry Point
 
@@ -25,7 +26,7 @@ Purpose:
 - Loads runtime config and bundled resources
 - Starts API server in thread (single/server mode)
 - Starts print monitor where required
-- Launches PySide6 main window
+- Launches desktop main window through `ui/qt.py`
 - Configures centralized logging (`logs/application.log`)
 
 Key functions:
@@ -35,6 +36,7 @@ Key functions:
 - `run_single_mode(config)`: API + monitor + UI
 - `run_server_mode(config, with_ui)`: centralized server mode
 - `run_client_mode(config, server_url)`: client monitor-only mode
+- `ensure_server_not_already_running(...)`: startup guard to prevent duplicate server instances
 
 ## 3. Client Monitoring
 
@@ -54,6 +56,7 @@ Windows APIs used:
 
 Captured fields:
 
+- `operator_id`
 - `computer_name`
 - `printer_name`
 - `document_name`
@@ -61,6 +64,8 @@ Captured fields:
 - `timestamp`
 - `print_type`
 - `paper_size`
+- `submission_time`
+- `user_name`
 
 Important behavior:
 
@@ -88,8 +93,11 @@ Purpose:
 Main endpoints:
 
 - `GET /health`
+- `GET /api/version`
+- `GET/PUT /api/system-config`
 - `GET/PUT /api/settings`
 - `POST/GET /api/print-jobs`
+- `DELETE /api/print-jobs/{job_id}`
 - `GET/POST /api/services/catalog`
 - `POST /api/services/record`
 - `GET /api/dashboard`
@@ -106,7 +114,7 @@ Purpose:
 
 Important models:
 
-- `PrintJobCreate` includes `paper_size`
+- `PrintJobCreate` includes `operator_id` and `paper_size`
 - `SettingsUpdate` includes retention + backup config
 
 ## 5. Database Layer
@@ -232,6 +240,13 @@ Build command:
 
 ```bash
 pyinstaller CyberCafeManager.spec
+```
+
+Split-role build commands:
+
+```bash
+pyinstaller CyberCafeServer.spec
+pyinstaller CyberCafeClient.spec
 ```
 
 ## 9. Logging and Diagnostics

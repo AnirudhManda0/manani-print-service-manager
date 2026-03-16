@@ -23,7 +23,7 @@ hiddenimports = [
 ]
 
 a = Analysis(
-    ["main.py"],
+    ["launch_server.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
@@ -43,7 +43,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="CyberCafeManager",
+    name="CyberCafeServer",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

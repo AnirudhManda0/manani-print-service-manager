@@ -7,14 +7,14 @@ It combines print-job capture, service billing, reporting, and backup into one o
 
 Install the following on a development machine:
 
-- Python 3.10+
+- Python 3.9 (recommended for Windows 7 and Windows 10 compatibility)
 - Git
 - PyInstaller
 - Printer drivers for the printers used in the shop
 
 Required Python libraries (installed through `requirements.txt`):
 
-- PySide6
+- PySide2
 - FastAPI
 - uvicorn
 - requests
@@ -95,19 +95,72 @@ or:
 python client/run_client.py --server-url http://<SERVER_IP>:8787 --poll-interval 0.5
 ```
 
+## Production Roles
+
+Admin Server (Windows 7/10):
+
+- Runs FastAPI + SQLite storage
+- Shows dashboard, reports, settings, and print log
+- Stores all transactions centrally
+- Can also monitor local print jobs
+
+Client Monitor (Windows 10):
+
+- Detects print jobs from local USB/TCP-IP printers
+- Sends print transactions to admin server via HTTP
+- Does not keep permanent transaction data
+
+## Configuration File
+
+Runtime settings are stored in `config/settings.json`.
+
+Example:
+
+```json
+{
+  "mode": "single",
+  "server_ip": "192.168.1.50",
+  "server_port": 8787,
+  "computer_name": "CLIENT-PC-01",
+  "operator_id": "ADMIN",
+  "poll_interval": 0.5,
+  "bw_price_per_page": 2.0,
+  "color_price_per_page": 10.0,
+  "database_path": "database/cybercafe.db",
+  "print_monitor_enabled": true
+}
+```
+
+Settings can be edited from the UI Settings panel. Changes are saved back to `config/settings.json`.
+
 ## Build Instructions
 
 Generate portable EXE:
 
 ```bash
+pyinstaller --onefile --name CyberCafeManager main.py
+```
+
+or use the project spec:
+
+```bash
 pyinstaller CyberCafeManager.spec
+```
+
+Generate dedicated server and client executables:
+
+```bash
+pyinstaller CyberCafeServer.spec
+pyinstaller CyberCafeClient.spec
 ```
 
 Build output:
 
 - `dist/CyberCafeManager.exe`
+- `dist/CyberCafeServer.exe`
+- `dist/CyberCafeClient.exe`
 
-This EXE is packaged with Python runtime and dependencies, so it can run on Windows 10/11 systems even when Python is not installed.
+This EXE is packaged with Python runtime and dependencies, so it can run without a Python installation.
 
 ## Portable Distribution
 
@@ -127,6 +180,7 @@ At first launch, the EXE auto-creates runtime folders next to itself:
 Share this file:
 
 - `dist/CyberCafeManager.exe`
+- or `dist/CyberCafeServer.exe` and `dist/CyberCafeClient.exe` for split deployment
 
 Recommended sharing methods:
 
@@ -147,6 +201,7 @@ End users only need to double-click `CyberCafeManager.exe`.
 ## Features
 
 - Automatic print capture using Windows spooler APIs
+- Operator ID tagging for print transactions
 - B&W and color billing with Decimal precision
 - Paper-size capture (`A4`, `A3`, `Letter`, `Unknown`)
 - Service catalog and one-click service recording
@@ -162,6 +217,48 @@ Printer not detected:
 - Verify printer driver installation.
 - Verify Print Spooler service is running.
 - Verify monitor mode is active and API is reachable.
+
+Spooler detection test (all printers):
+
+1. Open terminal in project root.
+2. Run:
+
+```bash
+python test_spooler_detection.py
+```
+
+3. Confirm your USB and network printers appear in the "Detected printers" list.
+4. Print a small test page (Notepad is enough) to each printer one by one.
+5. Check console output for:
+
+- `New print job detected`
+- `printer_name`
+- `document_name`
+- `total_pages`
+- `submission_time`
+- `user_name`
+- page count greater than zero before job is recorded
+
+Tip: Keep `MANANI_LOG_LEVEL=DEBUG` to see queue polling diagnostics (`Detected printer`, `Checking queue`, `Pages detected`, `Job recorded`).
+
+## End-to-End Test
+
+1. Start application (`python main.py` or executable).
+2. Print a test document (for example 18-page PDF).
+3. Verify Print Log shows correct `pages` value (not 0).
+4. Verify Dashboard updates `Total Prints Today`, `B&W Pages`/`Color Pages`, and `Total Revenue`.
+5. Verify Delete button removes selected print transaction.
+6. Open Services -> Add Service, enter expressions like `10 * 2`, and verify calculated value is saved as `20`.
+
+## Update-Safe Process
+
+1. Stop running application.
+2. Trigger/verify backup (Settings -> Run Backup Now), or copy `database/cybercafe.db`.
+3. Replace executable (`CyberCafeServer.exe` / `CyberCafeClient.exe`).
+4. Keep existing `database/` and `config/` folders unchanged.
+5. Start application again.
+
+Daily backup files are written to `backup/` (configurable in Settings).
 
 Port already in use:
 

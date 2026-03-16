@@ -4,12 +4,13 @@ Operators manage a service catalog and record service sales.
 All persistence is handled by API calls, not direct DB writes from UI.
 """
 
+import ast
+import math
+import operator
 from datetime import datetime
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
+from ui.qt import (
     QDialog,
-    QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
@@ -18,12 +19,58 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    Signal,
     QVBoxLayout,
     QWidget,
 )
 
 from ui.formatting import format_currency
-from ui.input_filters import disable_wheel_changes
+
+
+def evaluate_price_expression(expression: str) -> float:
+    """Safely evaluate +, -, *, / arithmetic expressions using AST."""
+    if not expression or not expression.strip():
+        raise ValueError("Expression is empty")
+
+    allowed_binary = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+    }
+    allowed_unary = {
+        ast.UAdd: lambda x: x,
+        ast.USub: lambda x: -x,
+    }
+
+    def _eval(node) -> float:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.Num):  # pragma: no cover - for older AST variants.
+            return float(node.n)
+        if isinstance(node, ast.BinOp) and type(node.op) in allowed_binary:
+            left = _eval(node.left)
+            right = _eval(node.right)
+            if isinstance(node.op, ast.Div) and abs(right) < 1e-12:
+                raise ValueError("Division by zero")
+            return float(allowed_binary[type(node.op)](left, right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in allowed_unary:
+            return float(allowed_unary[type(node.op)](_eval(node.operand)))
+        raise ValueError("Unsupported expression")
+
+    try:
+        parsed = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError("Invalid expression syntax") from exc
+
+    result = _eval(parsed)
+    if not math.isfinite(result):
+        raise ValueError("Invalid numeric result")
+    if result < 0:
+        raise ValueError("Value cannot be negative")
+    return round(result, 2)
 
 
 class AddServiceDialog(QDialog):
@@ -32,33 +79,56 @@ class AddServiceDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Add Service")
-        self.resize(320, 160)
+        self.resize(520, 230)
+        self._calculated_value = 0.0
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(12)
 
         self.name_input = QLineEdit()
-        self.price_input = QDoubleSpinBox()
-        self.price_input.setRange(0, 100000)
-        self.price_input.setDecimals(2)
-        self.price_input.setValue(100.0)
-        disable_wheel_changes(self.price_input)
+        self.name_input.setMinimumHeight(38)
+        self.price_input = QLineEdit()
+        self.price_input.setText("100")
+        self.price_input.setMinimumHeight(46)
+        self.price_input.setPlaceholderText("Type expression: 10 * 2, 5 + 5, 20 / 2")
+        self.price_input.textChanged.connect(self._update_calculated_value)
+        self.calculated_value_label = QLabel("Calculated Value: 100.00")
+        self.calculated_value_label.setObjectName("secondaryLabel")
 
         form.addRow("Service Name", self.name_input)
-        form.addRow("Default Price", self.price_input)
+        form.addRow("Price Expression", self.price_input)
+        form.addRow("Result", self.calculated_value_label)
         layout.addLayout(form)
 
         buttons = QHBoxLayout()
-        save_btn = QPushButton("Save")
+        self.save_btn = QPushButton("Save")
         cancel_btn = QPushButton("Cancel")
-        save_btn.clicked.connect(self.accept)
+        self.save_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
-        buttons.addWidget(save_btn)
+        buttons.addWidget(self.save_btn)
         buttons.addWidget(cancel_btn)
+        buttons.addStretch()
         layout.addLayout(buttons)
+        self._update_calculated_value()
+
+    def _update_calculated_value(self) -> None:
+        expr = self.price_input.text().strip()
+        try:
+            value = evaluate_price_expression(expr)
+            self._calculated_value = value
+            self.calculated_value_label.setText(f"Calculated Value: {value:.2f}")
+            self.calculated_value_label.setStyleSheet("")
+            self.save_btn.setEnabled(True)
+        except ValueError as exc:
+            self._calculated_value = -1.0
+            self.calculated_value_label.setText(f"Invalid expression: {exc}")
+            self.calculated_value_label.setStyleSheet("color: #c0392b;")
+            self.save_btn.setEnabled(False)
 
     def values(self):
-        return self.name_input.text().strip(), float(self.price_input.value())
+        return self.name_input.text().strip(), float(self._calculated_value)
 
 
 class ServicesPanel(QWidget):
@@ -146,6 +216,9 @@ class ServicesPanel(QWidget):
         name, price = dialog.values()
         if not name:
             QMessageBox.warning(self, "Validation", "Service name is required.")
+            return
+        if price < 0:
+            QMessageBox.warning(self, "Validation", "Enter a valid price expression.")
             return
         try:
             self.api.add_service(name, price)

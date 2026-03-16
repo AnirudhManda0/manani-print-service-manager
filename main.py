@@ -8,9 +8,9 @@ Responsibilities:
 """
 
 import argparse
-import json
 import logging
 import os
+import socket
 import shutil
 import sys
 import threading
@@ -22,16 +22,11 @@ import requests
 import uvicorn
 
 from client.print_monitor import PrintMonitor, run_background_client
+from runtime_config import load_config_file, normalize_config, save_config_file
 from server.api import create_app
 
 
-DEFAULT_CONFIG = {
-    "mode": "single",
-    "api": {"host": "127.0.0.1", "port": 8787},
-    "database": {"path": "database/cybercafe.db"},
-    "print_monitor": {"enabled": True, "poll_interval_seconds": 0.5},
-    "central_server_url": "http://127.0.0.1:8787",
-}
+DEFAULT_CONFIG = normalize_config({})
 
 
 def configure_logging() -> None:
@@ -99,15 +94,17 @@ def ensure_runtime_files() -> None:
 
     config_dst = os.path.join(runtime, "config", "settings.json")
     schema_dst = os.path.join(runtime, "database", "schema.sql")
+    version_dst = os.path.join(runtime, "version.txt")
     config_src = os.path.join(bundle, "config", "settings.json")
     schema_src = os.path.join(bundle, "database", "schema.sql")
+    version_src = os.path.join(bundle, "version.txt")
 
     _copy_if_missing(config_src, config_dst)
     _copy_if_missing(schema_src, schema_dst)
+    _copy_if_missing(version_src, version_dst)
 
     if not os.path.exists(config_dst):
-        with open(config_dst, "w", encoding="utf-8") as f:
-            json.dump(DEFAULT_CONFIG, f, indent=2)
+        save_config_file(config_dst, DEFAULT_CONFIG)
 
     if not os.path.exists(schema_dst):
         raise FileNotFoundError(f"schema.sql missing at {schema_dst}")
@@ -125,14 +122,37 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     ensure_runtime_files()
     default_config_path = os.path.join(install_root(), "config", "settings.json")
     final_path = config_path or default_config_path
-    with open(final_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    config = load_config_file(final_path)
+    save_config_file(final_path, config)
+    return config
+
+
+def save_config(config: Dict[str, Any], config_path: Optional[str] = None) -> Dict[str, Any]:
+    default_config_path = os.path.join(install_root(), "config", "settings.json")
+    final_path = config_path or default_config_path
+    return save_config_file(final_path, config)
+
+
+def read_app_version() -> str:
+    """Read version from runtime or bundled version.txt."""
+    candidates = [
+        os.path.join(install_root(), "version.txt"),
+        os.path.join(bundled_root(), "version.txt"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                version = handle.read().strip()
+                if version:
+                    return version
+    return "1.0.0"
 
 
 class APIServerThread:
     """Runs FastAPI/Uvicorn in a background thread so UI can stay responsive."""
-    def __init__(self, db_path: str, schema_path: str, host: str, port: int) -> None:
-        self.app = create_app(db_path=db_path, schema_path=schema_path)
+
+    def __init__(self, db_path: str, schema_path: str, config_path: str, app_version: str, host: str, port: int) -> None:
+        self.app = create_app(db_path=db_path, schema_path=schema_path, config_path=config_path, app_version=app_version)
         self.config = uvicorn.Config(
             self.app,
             host=host,
@@ -163,16 +183,25 @@ def wait_for_api(base_url: str, retries: int = 30, delay: float = 0.3) -> bool:
     return False
 
 
-def run_with_ui(api_url: str, monitor: Optional[PrintMonitor] = None) -> None:
+def ensure_server_not_already_running(host: str, port: int) -> None:
+    """Fail fast if a server already listens on configured host/port."""
+    check_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        if sock.connect_ex((check_host, int(port))) == 0:
+            raise RuntimeError("Application already running.")
+
+
+def run_with_ui(api_url: str, app_version: str, monitor: Optional[PrintMonitor] = None) -> None:
     """Start Qt event loop and connect UI to API."""
-    from PySide6.QtWidgets import QApplication
+    from ui.qt import QApplication
 
     from ui.api_client import APIClient
     from ui.main_window import MainWindow
 
     app = QApplication(sys.argv)
     client = APIClient(api_url)
-    window = MainWindow(client)
+    window = MainWindow(client, app_version=app_version)
     window.show()
     exit_code = app.exec()
     if monitor:
@@ -183,8 +212,9 @@ def run_with_ui(api_url: str, monitor: Optional[PrintMonitor] = None) -> None:
 def _runtime_paths(config: Dict[str, Any]) -> Dict[str, str]:
     """Build concrete DB/schema paths for the current runtime environment."""
     return {
-        "db_path": resolve_runtime_path(config.get("database", {}).get("path", "database/cybercafe.db")),
+        "db_path": resolve_runtime_path(str(config.get("database_path", "database/cybercafe.db"))),
         "schema_path": resource_path("database/schema.sql"),
+        "config_path": resolve_runtime_path("config/settings.json"),
     }
 
 
@@ -197,25 +227,35 @@ def _ui_api_url(host: str, port: int) -> str:
 def run_single_mode(config: Dict[str, Any]) -> None:
     """Single-PC mode: API + monitor + UI all on one machine."""
     paths = _runtime_paths(config)
-    host = config["api"]["host"]
-    port = int(config["api"]["port"])
+    host = str(config.get("server_ip", "127.0.0.1"))
+    port = int(config.get("server_port", 8787))
+    app_version = read_app_version()
     api_url = _ui_api_url(host, port)
 
-    server = APIServerThread(db_path=paths["db_path"], schema_path=paths["schema_path"], host=host, port=port)
+    server = APIServerThread(
+        db_path=paths["db_path"],
+        schema_path=paths["schema_path"],
+        config_path=paths["config_path"],
+        app_version=app_version,
+        host=host,
+        port=port,
+    )
     server.start()
     if not wait_for_api(api_url):
         raise RuntimeError("API server did not start in time.")
 
     monitor = None
-    if config.get("print_monitor", {}).get("enabled", True):
+    if bool(config.get("print_monitor_enabled", True)):
         monitor = PrintMonitor(
             api_base_url=api_url,
-            poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 0.5)),
+            poll_interval=float(config.get("poll_interval", 0.5)),
+            computer_name=str(config.get("computer_name") or socket.gethostname()),
+            operator_id=str(config.get("operator_id") or "ADMIN"),
         )
         monitor.start()
 
     try:
-        run_with_ui(api_url, monitor=monitor)
+        run_with_ui(api_url, app_version=app_version, monitor=monitor)
     finally:
         if monitor:
             monitor.stop()
@@ -225,32 +265,47 @@ def run_single_mode(config: Dict[str, Any]) -> None:
 def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
     """Central server mode with optional UI."""
     paths = _runtime_paths(config)
-    host = config["api"]["host"]
-    port = int(config["api"]["port"])
+    host = str(config.get("server_ip", "127.0.0.1"))
+    port = int(config.get("server_port", 8787))
+    app_version = read_app_version()
     api_url = _ui_api_url(host, port)
 
     if with_ui:
-        server = APIServerThread(db_path=paths["db_path"], schema_path=paths["schema_path"], host=host, port=port)
+        server = APIServerThread(
+            db_path=paths["db_path"],
+            schema_path=paths["schema_path"],
+            config_path=paths["config_path"],
+            app_version=app_version,
+            host=host,
+            port=port,
+        )
         server.start()
         if not wait_for_api(api_url):
             raise RuntimeError("API server did not start in time.")
 
         monitor = None
-        if config.get("print_monitor", {}).get("enabled", True):
+        if bool(config.get("print_monitor_enabled", True)):
             monitor = PrintMonitor(
                 api_base_url=api_url,
-                poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 0.5)),
+                poll_interval=float(config.get("poll_interval", 0.5)),
+                computer_name=str(config.get("computer_name") or socket.gethostname()),
+                operator_id=str(config.get("operator_id") or "ADMIN"),
             )
             monitor.start()
 
         try:
-            run_with_ui(api_url=api_url, monitor=monitor)
+            run_with_ui(api_url=api_url, app_version=app_version, monitor=monitor)
         finally:
             if monitor:
                 monitor.stop()
             server.stop()
     else:
-        app = create_app(db_path=paths["db_path"], schema_path=paths["schema_path"])
+        app = create_app(
+            db_path=paths["db_path"],
+            schema_path=paths["schema_path"],
+            config_path=paths["config_path"],
+            app_version=app_version,
+        )
         uvicorn.run(
             app,
             host=host,
@@ -263,7 +318,12 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
 def run_client_mode(config: Dict[str, Any], server_url: Optional[str] = None) -> None:
     """Client-only mode for remote PCs that only monitor printers and send jobs."""
     target = server_url or config.get("central_server_url", "http://127.0.0.1:8787")
-    run_background_client(target, poll_interval=float(config.get("print_monitor", {}).get("poll_interval_seconds", 0.5)))
+    run_background_client(
+        target,
+        poll_interval=float(config.get("poll_interval", 0.5)),
+        computer_name=str(config.get("computer_name") or socket.gethostname()),
+        operator_id=str(config.get("operator_id") or "ADMIN"),
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -281,6 +341,17 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     mode = args.mode or config.get("mode", "single")
+
+    if mode in {"single", "server"}:
+        try:
+            ensure_server_not_already_running(
+                host=str(config.get("server_ip", "127.0.0.1")),
+                port=int(config.get("server_port", 8787)),
+            )
+        except RuntimeError as exc:
+            logging.error(str(exc))
+            print(str(exc))
+            return
 
     if mode == "single":
         run_single_mode(config)

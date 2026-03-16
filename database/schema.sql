@@ -2,10 +2,11 @@
 
 CREATE TABLE IF NOT EXISTS print_jobs (
     id INTEGER PRIMARY KEY,
+    operator_id TEXT NOT NULL DEFAULT 'ADMIN',
     computer_name TEXT NOT NULL,
     printer_name TEXT NOT NULL,
     document_name TEXT,
-    pages INTEGER NOT NULL CHECK (pages >= 0),
+    pages INTEGER NOT NULL CHECK (pages >= 1),
     print_type TEXT NOT NULL CHECK (print_type IN ('black_and_white', 'color')),
     paper_size TEXT NOT NULL DEFAULT 'Unknown',
     price_per_page REAL NOT NULL,
@@ -50,3 +51,9 @@ INSERT OR IGNORE INTO settings (
     currency
 )
 VALUES (1, 2.0, 10.0, 'INR');
+
+INSERT OR IGNORE INTO services_catalog (service_name, default_price) VALUES ('PAN Card', 120.0);
+INSERT OR IGNORE INTO services_catalog (service_name, default_price) VALUES ('Exam Registration', 80.0);
+INSERT OR IGNORE INTO services_catalog (service_name, default_price) VALUES ('Scanning', 20.0);
+INSERT OR IGNORE INTO services_catalog (service_name, default_price) VALUES ('Lamination', 30.0);
+INSERT OR IGNORE INTO services_catalog (service_name, default_price) VALUES ('Photo Printing', 50.0);
