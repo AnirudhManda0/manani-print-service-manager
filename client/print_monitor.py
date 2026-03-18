@@ -391,6 +391,16 @@ class PrintMonitor:
             f"{payload.get('document_name', '')}"
         )
 
+    def _source_job_key(self, *, printer_name: str, job_id: int, submission_time: Optional[str], document_name: str) -> str:
+        # Stable key used by server-side idempotency to avoid duplicates from retry races.
+        return (
+            f"{self.computer_name.strip()}|"
+            f"{printer_name.strip()}|"
+            f"{int(job_id)}|"
+            f"{(submission_time or '').strip()}|"
+            f"{document_name.strip()}"
+        )
+
     def _remember_job(self, key: str) -> None:
         self._seen_jobs.add(key)
         self._seen_order.append(key)
@@ -501,6 +511,12 @@ class PrintMonitor:
             "operator_id": self.operator_id,
             "printer_name": printer_name,
             "document_name": document_name,
+            "source_job_key": self._source_job_key(
+                printer_name=printer_name,
+                job_id=job_id,
+                submission_time=submission_time,
+                document_name=document_name,
+            ),
             "pages": max(1, self._safe_int(pages, default=1)),
             "print_type": metadata["print_type"],
             "paper_size": metadata["paper_size"],

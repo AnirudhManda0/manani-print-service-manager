@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     computer_name TEXT NOT NULL,
     printer_name TEXT NOT NULL,
     document_name TEXT,
+    source_job_key TEXT NOT NULL DEFAULT '',
     pages INTEGER NOT NULL CHECK (pages >= 1),
     print_type TEXT NOT NULL CHECK (print_type IN ('black_and_white', 'color')),
     paper_size TEXT NOT NULL DEFAULT 'Unknown',
@@ -41,6 +42,9 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_print_jobs_timestamp ON print_jobs (timestamp);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_print_jobs_source_job_key
+ON print_jobs (source_job_key)
+WHERE source_job_key <> '';
 CREATE INDEX IF NOT EXISTS idx_service_records_timestamp ON service_records (timestamp);
 CREATE INDEX IF NOT EXISTS idx_service_records_service_id ON service_records (service_id);
 

@@ -9,6 +9,7 @@ class PrintJobCreate(BaseModel):
     computer_name: str = Field(..., min_length=1, max_length=120)
     printer_name: str = Field(..., min_length=1, max_length=255)
     document_name: str = Field(default="", max_length=500)
+    source_job_key: str = Field(default="", max_length=500)
     pages: int = Field(..., ge=1, le=100000)
     print_type: Literal["black_and_white", "color"] = "black_and_white"
     paper_size: Literal["A4", "A3", "Letter", "Unknown"] = "Unknown"

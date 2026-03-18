@@ -169,6 +169,7 @@ def create_app(
             computer_name=payload.computer_name,
             printer_name=payload.printer_name,
             document_name=payload.document_name,
+            source_job_key=payload.source_job_key,
             pages=payload.pages,
             print_type=payload.print_type,
             paper_size=payload.paper_size,

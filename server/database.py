@@ -111,8 +111,31 @@ class Database:
         print_columns = self._table_columns("print_jobs")
         if "operator_id" not in print_columns:
             self._conn.execute("ALTER TABLE print_jobs ADD COLUMN operator_id TEXT NOT NULL DEFAULT 'ADMIN';")
+        if "source_job_key" not in print_columns:
+            self._conn.execute("ALTER TABLE print_jobs ADD COLUMN source_job_key TEXT NOT NULL DEFAULT '';")
         if "paper_size" not in print_columns:
             self._conn.execute("ALTER TABLE print_jobs ADD COLUMN paper_size TEXT NOT NULL DEFAULT 'Unknown';")
+        # Preserve the first occurrence of duplicate source keys so unique index can be created safely.
+        self._conn.execute(
+            """
+            UPDATE print_jobs
+            SET source_job_key = ''
+            WHERE source_job_key <> ''
+              AND id NOT IN (
+                  SELECT MIN(id)
+                  FROM print_jobs
+                  WHERE source_job_key <> ''
+                  GROUP BY source_job_key
+              );
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_print_jobs_source_job_key
+            ON print_jobs (source_job_key)
+            WHERE source_job_key <> '';
+            """
+        )
         self._conn.execute(
             """
             UPDATE print_jobs
@@ -272,6 +295,7 @@ class Database:
         computer_name: str,
         printer_name: str,
         document_name: str,
+        source_job_key: str,
         pages: int,
         print_type: str,
         paper_size: str = "Unknown",
@@ -288,6 +312,7 @@ class Database:
         safe_type = "color" if print_type == "color" else "black_and_white"
         safe_paper_size = self._normalize_paper_size(paper_size)
         safe_operator = (str(operator_id or "ADMIN").strip() or "ADMIN")[:120]
+        safe_source_key = (str(source_job_key or "").strip())[:500]
         settings = self.get_settings()
         price_per_page = (
             self._money(settings["color_price_per_page"])
@@ -297,31 +322,98 @@ class Database:
         total_cost = (price_per_page * Decimal(safe_pages)).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
         ts = self._to_db_time(timestamp)
 
+        if safe_source_key:
+            with self._lock:
+                existing = self._conn.execute(
+                    """
+                    SELECT
+                        id,
+                        operator_id,
+                        computer_name,
+                        printer_name,
+                        document_name,
+                        source_job_key,
+                        pages,
+                        print_type,
+                        paper_size,
+                        price_per_page,
+                        total_cost,
+                        timestamp
+                    FROM print_jobs
+                    WHERE source_job_key = ?
+                    LIMIT 1;
+                    """,
+                    (safe_source_key,),
+                ).fetchone()
+            if existing:
+                logger.info(
+                    "Duplicate print job skipped by source_job_key: key=%s id=%s computer=%s printer=%s",
+                    safe_source_key,
+                    existing["id"],
+                    existing["computer_name"],
+                    existing["printer_name"],
+                )
+                return dict(existing)
+
         with self._lock:
-            cursor = self._conn.execute(
-                """
-                INSERT INTO print_jobs
-                (operator_id, computer_name, printer_name, document_name, pages, print_type, paper_size, price_per_page, total_cost, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (
-                    safe_operator,
-                    computer_name,
-                    printer_name,
-                    document_name,
-                    safe_pages,
-                    safe_type,
-                    safe_paper_size,
-                    self._money_float(price_per_page),
-                    self._money_float(total_cost),
-                    ts,
-                ),
-            )
-            self._conn.commit()
-            job_id = cursor.lastrowid
+            try:
+                cursor = self._conn.execute(
+                    """
+                    INSERT INTO print_jobs
+                    (operator_id, computer_name, printer_name, document_name, source_job_key, pages, print_type, paper_size, price_per_page, total_cost, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    (
+                        safe_operator,
+                        computer_name,
+                        printer_name,
+                        document_name,
+                        safe_source_key,
+                        safe_pages,
+                        safe_type,
+                        safe_paper_size,
+                        self._money_float(price_per_page),
+                        self._money_float(total_cost),
+                        ts,
+                    ),
+                )
+                self._conn.commit()
+                job_id = cursor.lastrowid
+            except sqlite3.IntegrityError:
+                if not safe_source_key:
+                    raise
+                existing = self._conn.execute(
+                    """
+                    SELECT
+                        id,
+                        operator_id,
+                        computer_name,
+                        printer_name,
+                        document_name,
+                        source_job_key,
+                        pages,
+                        print_type,
+                        paper_size,
+                        price_per_page,
+                        total_cost,
+                        timestamp
+                    FROM print_jobs
+                    WHERE source_job_key = ?
+                    LIMIT 1;
+                    """,
+                    (safe_source_key,),
+                ).fetchone()
+                if existing:
+                    logger.info(
+                        "Duplicate print job ignored on insert conflict: key=%s id=%s",
+                        safe_source_key,
+                        existing["id"],
+                    )
+                    return dict(existing)
+                raise
 
         logger.info(
-            "Print job captured: id=%s operator=%s computer=%s printer=%s pages=%s type=%s paper=%s total=%s",
+            "Print job captured: id=%s operator=%s computer=%s printer=%s pages=%s type=%s paper=%s total=%s source_key=%s",
             job_id,
             safe_operator,
             computer_name,
@@ -330,6 +422,7 @@ class Database:
             safe_type,
             safe_paper_size,
             total_cost,
+            safe_source_key or "-",
         )
         return {
             "id": job_id,
@@ -337,6 +430,7 @@ class Database:
             "computer_name": computer_name,
             "printer_name": printer_name,
             "document_name": document_name,
+            "source_job_key": safe_source_key,
             "pages": safe_pages,
             "print_type": safe_type,
             "paper_size": safe_paper_size,
@@ -353,6 +447,7 @@ class Database:
                 computer_name,
                 printer_name,
                 document_name,
+                source_job_key,
                 pages,
                 print_type,
                 paper_size,

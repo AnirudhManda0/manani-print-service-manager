@@ -49,6 +49,19 @@ pyinstaller CyberCafeClient.spec
 3. Copy `dist/CyberCafeClient.exe` to each client PC.
 4. Run executable directly.
 
+Optional: generate direct deployment ZIPs:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1
+```
+
+This creates:
+
+- `release/CyberCafeServer.zip`
+- `release/CyberCafeClient.zip`
+
+Each ZIP can be copied to the target machine, extracted, and run without Python installation.
+
 The app creates runtime folders/files automatically if missing:
 
 - `config/settings.json`
@@ -117,6 +130,12 @@ python client/run_client.py --config config/settings.json
 
 Validate that print jobs from client PCs appear on the server dashboard/log.
 
+Concurrency safety:
+
+- Multiple Windows 10 client PCs can submit print jobs at the same time.
+- The server uses SQLite WAL mode + thread lock + idempotent `source_job_key` ingestion.
+- Retries or network race conditions will not create duplicate print rows.
+
 ## 7. Backup and Recovery
 
 - Main DB: `database/cybercafe.db`
@@ -145,6 +164,7 @@ Restore process:
 - [ ] Numeric fields do not change by mouse-wheel scroll
 - [ ] Service record can be added from UI
 - [ ] Test print appears in print log with correct page count
+- [ ] Simultaneous print from 2 PCs appears as two separate transactions (no duplicates)
 - [ ] Dashboard revenue reflects printed pages (for example 18 pages x 2 INR = 36 INR)
 - [ ] Report shows B&W/Color and A3/A4 values
 - [ ] Add Service expression input works (for example `10 * 2` stores `20`)

@@ -162,6 +162,17 @@ Build output:
 
 This EXE is packaged with Python runtime and dependencies, so it can run without a Python installation.
 
+Create ready-to-copy ZIP packages:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1
+```
+
+Generated files:
+
+- `release/CyberCafeServer.zip`
+- `release/CyberCafeClient.zip`
+
 ## Portable Distribution
 
 Portable file to distribute:
@@ -209,6 +220,7 @@ End users only need to double-click `CyberCafeManager.exe`.
 - Data retention actions (retain/archive/delete)
 - Daily automatic SQLite backup
 - Light/Dark desktop UI theme
+- Idempotent multi-client print ingestion (simultaneous or retried submissions do not duplicate rows)
 
 ## Troubleshooting
 
@@ -267,7 +279,8 @@ Port already in use:
 Database busy/locked:
 
 - Avoid editing DB externally while app is running.
-- Keep one central writer in multi-PC mode.
+- Run one central admin server (`CyberCafeServer.exe`) and connect clients through API.
+- Multiple client PCs can submit at the same time; server-side `source_job_key` idempotency prevents duplicate inserts.
 
 Enable debug logs:
 
