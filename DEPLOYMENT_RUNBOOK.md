@@ -68,6 +68,8 @@ powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1
    - `mode: "server"`
    - `server_ip: "192.168.1.50"`
    - `server_port: 8787`
+   - `auto_discovery_enabled: true`
+   - `discovery_port: 8788`
    - `computer_name: "ADMIN-PC"`
    - `operator_id: "ADMIN"`
 4. Ensure printer drivers are installed.
@@ -81,7 +83,9 @@ powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1
 2. Extract to folder, for example `D:\CyberCafeClient`.
 3. Edit `config/settings.json`:
    - `mode: "client"`
-   - `central_server_url: "http://192.168.1.50:8787"`
+   - `auto_discovery_enabled: true`
+   - `discovery_port: 8788`
+   - `central_server_url: "http://192.168.1.50:8787"` (optional fallback)
    - `computer_name: "CLIENT-PC-01"` (unique per machine)
    - `operator_id: "ADMIN"` (or operator name used at this machine)
 4. Ensure local printers are installed and test-print works in Windows.
@@ -104,6 +108,7 @@ The system supports concurrent submissions from multiple PCs.
 Technical safeguards:
 
 - Client monitor deduplicates local spooler jobs by printer/job/timestamp/document.
+- Client monitor keeps unsent jobs in an in-memory retry queue while the app is running.
 - Server stores jobs with idempotent `source_job_key`.
 - SQLite WAL mode + thread lock protects concurrent writes.
 

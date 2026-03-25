@@ -45,6 +45,12 @@ class SettingsPanel(QWidget):
         self.server_port = QSpinBox()
         self.server_port.setRange(1, 65535)
         disable_wheel_changes(self.server_port)
+        self.auto_discovery = QComboBox()
+        self.auto_discovery.addItem("Enabled", True)
+        self.auto_discovery.addItem("Disabled", False)
+        self.discovery_port = QSpinBox()
+        self.discovery_port.setRange(1, 65535)
+        disable_wheel_changes(self.discovery_port)
         self.computer_name = QLineEdit()
         self.operator_id = QLineEdit()
         self.poll_interval = QDoubleSpinBox()
@@ -88,6 +94,8 @@ class SettingsPanel(QWidget):
 
         form.addRow("Server IP", self.server_ip)
         form.addRow("Server Port", self.server_port)
+        form.addRow("Auto Discover Server", self.auto_discovery)
+        form.addRow("Discovery Port", self.discovery_port)
         form.addRow("Computer Name", self.computer_name)
         form.addRow("Operator ID", self.operator_id)
         form.addRow("Polling Interval (sec)", self.poll_interval)
@@ -127,6 +135,10 @@ class SettingsPanel(QWidget):
             data = self.api.get_settings()
             self.server_ip.setText(str(system_data.get("server_ip", "127.0.0.1")))
             self.server_port.setValue(int(system_data.get("server_port", 8787)))
+            auto_discovery_enabled = bool(system_data.get("auto_discovery_enabled", True))
+            auto_discovery_index = self.auto_discovery.findData(auto_discovery_enabled)
+            self.auto_discovery.setCurrentIndex(auto_discovery_index if auto_discovery_index >= 0 else 0)
+            self.discovery_port.setValue(int(system_data.get("discovery_port", 8788)))
             self.computer_name.setText(str(system_data.get("computer_name", "")))
             self.operator_id.setText(str(system_data.get("operator_id", "ADMIN")))
             self.poll_interval.setValue(float(system_data.get("poll_interval", 0.5)))
@@ -156,6 +168,8 @@ class SettingsPanel(QWidget):
             self.api.update_system_config(
                 server_ip=self.server_ip.text().strip(),
                 server_port=int(self.server_port.value()),
+                auto_discovery_enabled=bool(self.auto_discovery.currentData()),
+                discovery_port=int(self.discovery_port.value()),
                 computer_name=self.computer_name.text().strip(),
                 operator_id=self.operator_id.text().strip() or "ADMIN",
                 poll_interval=float(self.poll_interval.value()),

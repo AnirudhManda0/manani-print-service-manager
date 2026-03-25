@@ -11,8 +11,13 @@ datas = [
 ]
 
 hiddenimports = [
+    "pythoncom",
+    "pywintypes",
+    "win32api",
     "win32print",
     "win32con",
+    "win32file",
+    "win32timezone",
 ]
 
 a = Analysis(
@@ -40,7 +45,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,

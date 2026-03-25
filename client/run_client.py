@@ -29,6 +29,8 @@ def main() -> None:
         poll_interval=poll_interval,
         computer_name=computer_name,
         operator_id=operator_id,
+        auto_discovery_enabled=bool(config.get("auto_discovery_enabled", True)),
+        discovery_port=int(config.get("discovery_port", 8788)),
     )
 
 

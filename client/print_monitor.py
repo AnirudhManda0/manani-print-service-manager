@@ -15,11 +15,16 @@ from datetime import datetime
 from typing import Callable, Dict, List, Optional, Set
 
 import requests
+from network_discovery import DEFAULT_DISCOVERY_PORT, discover_server_urls
 
 try:
+    import pythoncom
+    import pywintypes
     import win32con
     import win32print
 except ImportError:  # pragma: no cover - only used on Windows with pywin32 installed.
+    pythoncom = None
+    pywintypes = None
     win32con = None
     win32print = None
 
@@ -37,13 +42,17 @@ class PrintMonitor:
         poll_interval: float = 0.5,
         computer_name: Optional[str] = None,
         operator_id: Optional[str] = None,
+        auto_discovery_enabled: bool = True,
+        discovery_port: int = DEFAULT_DISCOVERY_PORT,
         max_processed_jobs: int = 100000,
     ) -> None:
-        self.api_base_url = api_base_url.rstrip("/") if api_base_url else None
+        self.api_base_url = self._normalize_api_url(api_base_url)
         self.on_job = on_job
         self.poll_interval = poll_interval
         self.computer_name = computer_name or socket.gethostname()
         self.operator_id = (operator_id or os.environ.get("MANANI_OPERATOR_ID") or "ADMIN").strip() or "ADMIN"
+        self.auto_discovery_enabled = bool(auto_discovery_enabled)
+        self.discovery_port = int(discovery_port)
         self.max_processed_jobs = max(1000, int(max_processed_jobs))
 
         self._stop_event = threading.Event()
@@ -51,8 +60,16 @@ class PrintMonitor:
         self._seen_jobs = set()
         self._seen_order = deque(maxlen=self.max_processed_jobs)
         self._pending_jobs: Dict[str, Dict[str, object]] = {}
+        self._outbox = deque()
+        self._api_candidates: List[str] = []
+        self._discovered_urls: List[str] = []
+        self._active_api_base_url = self.api_base_url
+        self._last_discovery_at = 0.0
+        self._last_connection_log_at = 0.0
+        self._printer_snapshot: List[str] = []
         self._terminal_flush_delay = max(1.5, float(self.poll_interval) * 3)
         self._post_exit_wait = max(2.5, float(self.poll_interval) * 6)
+        self._remember_api_candidate(self.api_base_url)
 
     @property
     def is_running(self) -> bool:
@@ -63,6 +80,14 @@ class PrintMonitor:
             return
         if win32print is None:
             raise RuntimeError("pywin32 is not available. Install pywin32 to enable print monitoring.")
+        logger.info(
+            "Print monitor runtime ready: computer=%s auto_discovery=%s discovery_port=%s pythoncom=%s pywintypes=%s",
+            self.computer_name,
+            self.auto_discovery_enabled,
+            self.discovery_port,
+            pythoncom is not None,
+            pywintypes is not None,
+        )
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="print-monitor")
         self._thread.start()
@@ -78,12 +103,67 @@ class PrintMonitor:
         while not self._stop_event.is_set():
             try:
                 printers = self._list_printers()
+                self._log_printer_inventory(printers)
                 for printer_name in printers:
                     logger.debug("Detected printer: %s", printer_name)
                     self._scan_printer_queue(printer_name)
+                self._drain_outbox()
             except Exception as exc:
                 logger.exception("Printer polling error: %s", exc)
             self._stop_event.wait(self.poll_interval)
+
+    @staticmethod
+    def _normalize_api_url(url: Optional[str]) -> Optional[str]:
+        text = str(url or "").strip().rstrip("/")
+        if not text:
+            return None
+        if not text.lower().startswith(("http://", "https://")):
+            return None
+        return text
+
+    def _remember_api_candidate(self, url: Optional[str]) -> None:
+        normalized = self._normalize_api_url(url)
+        if normalized and normalized not in self._api_candidates:
+            self._api_candidates.append(normalized)
+
+    def _refresh_discovered_urls(self, force: bool = False) -> None:
+        if not self.auto_discovery_enabled:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_discovery_at < 15:
+            return
+        self._last_discovery_at = now
+        discovered = [self._normalize_api_url(url) for url in discover_server_urls(port=self.discovery_port, timeout=1.2)]
+        normalized = [url for url in discovered if url]
+        if normalized != self._discovered_urls:
+            if normalized:
+                logger.info("Auto-discovered server URLs: %s", ", ".join(normalized))
+            else:
+                logger.info("No admin server discovered on UDP %s", self.discovery_port)
+        self._discovered_urls = normalized
+        for url in normalized:
+            self._remember_api_candidate(url)
+
+    def _candidate_api_urls(self, force_discovery: bool = False) -> List[str]:
+        if force_discovery:
+            self._refresh_discovered_urls(force=True)
+        elif self.auto_discovery_enabled and not (self._active_api_base_url or self._api_candidates or self._discovered_urls):
+            self._refresh_discovered_urls(force=False)
+        urls: List[str] = []
+        for url in [self._active_api_base_url] + self._api_candidates + self._discovered_urls:
+            normalized = self._normalize_api_url(url)
+            if normalized and normalized not in urls:
+                urls.append(normalized)
+        return urls
+
+    def _log_printer_inventory(self, printers: List[str]) -> None:
+        if printers == self._printer_snapshot:
+            return
+        self._printer_snapshot = list(printers)
+        if printers:
+            logger.info("Detected printers (%s): %s", len(printers), ", ".join(printers))
+        else:
+            logger.warning("Detected printers (0): no printers available from Windows spooler")
 
     def _list_printers(self) -> List[str]:
         """Enumerate all locally installed and connected printers."""
@@ -527,34 +607,60 @@ class PrintMonitor:
         }
 
     def _dispatch(self, payload: Dict[str, object]) -> None:
-        if self.api_base_url:
-            self._send_to_api(payload)
+        if self.api_base_url or self._api_candidates or self.auto_discovery_enabled:
+            self._outbox.append(dict(payload))
+            self._drain_outbox()
             return
         if self.on_job:
             self.on_job(payload)
 
-    def _send_to_api(self, payload: Dict[str, object]) -> None:
-        url = f"{self.api_base_url}/api/print-jobs"
+    def _drain_outbox(self) -> None:
+        while self._outbox:
+            payload = self._outbox[0]
+            if not self._send_to_api(payload):
+                return
+            self._outbox.popleft()
+
+    def _send_to_api(self, payload: Dict[str, object]) -> bool:
+        candidate_urls = self._candidate_api_urls(force_discovery=False)
+        if not candidate_urls and self.auto_discovery_enabled:
+            candidate_urls = self._candidate_api_urls(force_discovery=True)
+
         logger.debug(
-            "Sending transaction to server: computer=%s printer=%s pages=%s",
+            "Sending transaction to server: computer=%s printer=%s pages=%s candidates=%s",
             payload.get("computer_name"),
             payload.get("printer_name"),
             payload.get("pages"),
+            ", ".join(candidate_urls) if candidate_urls else "none",
         )
-        for attempt in range(3):
+
+        last_error = None
+        for base_url in candidate_urls:
+            url = f"{base_url}/api/print-jobs"
             try:
                 response = requests.post(url, json=payload, timeout=3)
                 response.raise_for_status()
+                self._active_api_base_url = base_url
+                self._remember_api_candidate(base_url)
                 logger.debug(
                     "Transaction stored successfully: printer=%s job_id=%s",
                     payload.get("printer_name"),
                     payload.get("job_id"),
                 )
-                return
+                return True
             except Exception as exc:
-                logger.warning("Failed to submit print job (attempt %s/3): %s", attempt + 1, exc)
-                time.sleep(0.5 * (attempt + 1))
-        logger.error("Dropping print job after repeated API failures: %s", json.dumps(payload))
+                last_error = exc
+                continue
+
+        now = time.monotonic()
+        if now - self._last_connection_log_at > 10:
+            self._last_connection_log_at = now
+            logger.warning(
+                "Unable to reach admin server. Job will stay queued for retry. last_error=%s payload=%s",
+                last_error,
+                json.dumps(payload),
+            )
+        return False
 
 
 def run_background_client(
@@ -562,6 +668,8 @@ def run_background_client(
     poll_interval: float = 0.5,
     computer_name: Optional[str] = None,
     operator_id: Optional[str] = None,
+    auto_discovery_enabled: bool = True,
+    discovery_port: int = DEFAULT_DISCOVERY_PORT,
 ) -> None:
     """Run monitor loop for standalone client deployment."""
     level_name = os.environ.get("MANANI_LOG_LEVEL", "INFO").upper()
@@ -575,6 +683,8 @@ def run_background_client(
         poll_interval=poll_interval,
         computer_name=computer_name,
         operator_id=operator_id,
+        auto_discovery_enabled=auto_discovery_enabled,
+        discovery_port=discovery_port,
     )
     monitor.start()
     try:

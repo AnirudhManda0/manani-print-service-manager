@@ -1,0 +1,6 @@
+CyberCafeServer Package
+
+1. Edit config\settings.json
+2. Set mode=server and server_ip/server_port
+3. Keep auto_discovery_enabled=true for easier client connection
+4. Start CyberCafeServer.exe

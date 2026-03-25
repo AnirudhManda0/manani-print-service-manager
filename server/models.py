@@ -45,6 +45,8 @@ class DataRetentionExecute(BaseModel):
 class SystemConfigUpdate(BaseModel):
     server_ip: str = Field(..., min_length=1, max_length=255)
     server_port: int = Field(..., ge=1, le=65535)
+    auto_discovery_enabled: bool = True
+    discovery_port: int = Field(default=8788, ge=1, le=65535)
     computer_name: str = Field(default="", max_length=120)
     operator_id: str = Field(default="ADMIN", min_length=1, max_length=120)
     poll_interval: float = Field(default=0.5, ge=0.1, le=10.0)

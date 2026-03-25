@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import importlib.util
 from pathlib import Path
 
 project_root = Path(SPECPATH)
@@ -12,15 +13,19 @@ datas = [
 ]
 
 hiddenimports = [
-    "PySide2.QtCore",
-    "PySide2.QtGui",
-    "PySide2.QtWidgets",
-    "PySide6.QtCore",
-    "PySide6.QtGui",
-    "PySide6.QtWidgets",
+    "pythoncom",
+    "pywintypes",
+    "win32api",
     "win32print",
     "win32con",
+    "win32file",
+    "win32timezone",
 ]
+
+if importlib.util.find_spec("PySide2") is not None:
+    hiddenimports.extend(["PySide2.QtCore", "PySide2.QtGui", "PySide2.QtWidgets"])
+if importlib.util.find_spec("PySide6") is not None:
+    hiddenimports.extend(["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets"])
 
 a = Analysis(
     ["main.py"],
@@ -47,7 +52,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

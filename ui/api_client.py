@@ -43,6 +43,8 @@ class APIClient:
         self,
         server_ip: str,
         server_port: int,
+        auto_discovery_enabled: bool,
+        discovery_port: int,
         computer_name: str,
         operator_id: str,
         poll_interval: float,
@@ -54,6 +56,8 @@ class APIClient:
             {
                 "server_ip": server_ip,
                 "server_port": server_port,
+                "auto_discovery_enabled": auto_discovery_enabled,
+                "discovery_port": discovery_port,
                 "computer_name": computer_name,
                 "operator_id": operator_id,
                 "poll_interval": poll_interval,

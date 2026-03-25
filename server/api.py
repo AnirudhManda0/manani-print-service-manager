@@ -104,6 +104,8 @@ def create_app(
         return {
             "server_ip": cfg.get("server_ip", "127.0.0.1"),
             "server_port": int(cfg.get("server_port", 8787)),
+            "auto_discovery_enabled": bool(cfg.get("auto_discovery_enabled", True)),
+            "discovery_port": int(cfg.get("discovery_port", 8788)),
             "computer_name": cfg.get("computer_name", ""),
             "operator_id": cfg.get("operator_id", "ADMIN"),
             "poll_interval": float(cfg.get("poll_interval", 0.5)),
@@ -118,6 +120,8 @@ def create_app(
             {
                 "server_ip": payload.server_ip.strip(),
                 "server_port": int(payload.server_port),
+                "auto_discovery_enabled": bool(payload.auto_discovery_enabled),
+                "discovery_port": int(payload.discovery_port),
                 "computer_name": payload.computer_name.strip() or cfg.get("computer_name", ""),
                 "operator_id": payload.operator_id.strip() or cfg.get("operator_id", "ADMIN"),
                 "poll_interval": float(payload.poll_interval),
@@ -129,6 +133,8 @@ def create_app(
         return {
             "server_ip": saved.get("server_ip"),
             "server_port": int(saved.get("server_port", 8787)),
+            "auto_discovery_enabled": bool(saved.get("auto_discovery_enabled", True)),
+            "discovery_port": int(saved.get("discovery_port", 8788)),
             "computer_name": saved.get("computer_name"),
             "operator_id": saved.get("operator_id", "ADMIN"),
             "poll_interval": float(saved.get("poll_interval", 0.5)),

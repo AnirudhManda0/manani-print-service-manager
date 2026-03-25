@@ -22,6 +22,7 @@ import requests
 import uvicorn
 
 from client.print_monitor import PrintMonitor, run_background_client
+from network_discovery import DEFAULT_DISCOVERY_PORT, ServerDiscoveryResponder
 from runtime_config import load_config_file, normalize_config, save_config_file
 from server.api import create_app
 
@@ -224,6 +225,23 @@ def _ui_api_url(host: str, port: int) -> str:
     return f"http://{connect_host}:{port}"
 
 
+def _detect_lan_ip() -> str:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 80))
+        return sock.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        sock.close()
+
+
+def _discovery_api_url(host: str, port: int) -> str:
+    if host in {"0.0.0.0", "::"}:
+        return f"http://{_detect_lan_ip()}:{port}"
+    return f"http://{host}:{port}"
+
+
 def run_single_mode(config: Dict[str, Any]) -> None:
     """Single-PC mode: API + monitor + UI all on one machine."""
     paths = _runtime_paths(config)
@@ -231,6 +249,7 @@ def run_single_mode(config: Dict[str, Any]) -> None:
     port = int(config.get("server_port", 8787))
     app_version = read_app_version()
     api_url = _ui_api_url(host, port)
+    discovery_url = _discovery_api_url(host, port)
 
     server = APIServerThread(
         db_path=paths["db_path"],
@@ -244,6 +263,14 @@ def run_single_mode(config: Dict[str, Any]) -> None:
     if not wait_for_api(api_url):
         raise RuntimeError("API server did not start in time.")
 
+    discovery = ServerDiscoveryResponder(
+        server_url=discovery_url,
+        computer_name=str(config.get("computer_name") or socket.gethostname()),
+        app_version=app_version,
+        port=int(config.get("discovery_port", DEFAULT_DISCOVERY_PORT)),
+    )
+    discovery.start()
+
     monitor = None
     if bool(config.get("print_monitor_enabled", True)):
         monitor = PrintMonitor(
@@ -251,6 +278,8 @@ def run_single_mode(config: Dict[str, Any]) -> None:
             poll_interval=float(config.get("poll_interval", 0.5)),
             computer_name=str(config.get("computer_name") or socket.gethostname()),
             operator_id=str(config.get("operator_id") or "ADMIN"),
+            auto_discovery_enabled=bool(config.get("auto_discovery_enabled", True)),
+            discovery_port=int(config.get("discovery_port", DEFAULT_DISCOVERY_PORT)),
         )
         monitor.start()
 
@@ -259,6 +288,7 @@ def run_single_mode(config: Dict[str, Any]) -> None:
     finally:
         if monitor:
             monitor.stop()
+        discovery.stop()
         server.stop()
 
 
@@ -269,6 +299,7 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
     port = int(config.get("server_port", 8787))
     app_version = read_app_version()
     api_url = _ui_api_url(host, port)
+    discovery_url = _discovery_api_url(host, port)
 
     if with_ui:
         server = APIServerThread(
@@ -283,6 +314,14 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
         if not wait_for_api(api_url):
             raise RuntimeError("API server did not start in time.")
 
+        discovery = ServerDiscoveryResponder(
+            server_url=discovery_url,
+            computer_name=str(config.get("computer_name") or socket.gethostname()),
+            app_version=app_version,
+            port=int(config.get("discovery_port", DEFAULT_DISCOVERY_PORT)),
+        )
+        discovery.start()
+
         monitor = None
         if bool(config.get("print_monitor_enabled", True)):
             monitor = PrintMonitor(
@@ -290,6 +329,8 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
                 poll_interval=float(config.get("poll_interval", 0.5)),
                 computer_name=str(config.get("computer_name") or socket.gethostname()),
                 operator_id=str(config.get("operator_id") or "ADMIN"),
+                auto_discovery_enabled=bool(config.get("auto_discovery_enabled", True)),
+                discovery_port=int(config.get("discovery_port", DEFAULT_DISCOVERY_PORT)),
             )
             monitor.start()
 
@@ -298,6 +339,7 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
         finally:
             if monitor:
                 monitor.stop()
+            discovery.stop()
             server.stop()
     else:
         app = create_app(
@@ -306,13 +348,23 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
             config_path=paths["config_path"],
             app_version=app_version,
         )
-        uvicorn.run(
-            app,
-            host=host,
-            port=port,
-            log_level="info",
-            log_config=None,
+        discovery = ServerDiscoveryResponder(
+            server_url=discovery_url,
+            computer_name=str(config.get("computer_name") or socket.gethostname()),
+            app_version=app_version,
+            port=int(config.get("discovery_port", DEFAULT_DISCOVERY_PORT)),
         )
+        discovery.start()
+        try:
+            uvicorn.run(
+                app,
+                host=host,
+                port=port,
+                log_level="info",
+                log_config=None,
+            )
+        finally:
+            discovery.stop()
 
 
 def run_client_mode(config: Dict[str, Any], server_url: Optional[str] = None) -> None:
@@ -323,6 +375,8 @@ def run_client_mode(config: Dict[str, Any], server_url: Optional[str] = None) ->
         poll_interval=float(config.get("poll_interval", 0.5)),
         computer_name=str(config.get("computer_name") or socket.gethostname()),
         operator_id=str(config.get("operator_id") or "ADMIN"),
+        auto_discovery_enabled=bool(config.get("auto_discovery_enabled", True)),
+        discovery_port=int(config.get("discovery_port", DEFAULT_DISCOVERY_PORT)),
     )
 
 

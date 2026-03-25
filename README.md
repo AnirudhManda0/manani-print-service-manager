@@ -7,7 +7,8 @@ It combines print-job capture, service billing, reporting, and backup into one o
 
 Install the following on a development machine:
 
-- Python 3.9 (recommended for Windows 7 and Windows 10 compatibility)
+- Python 3.9 for Windows 7 production builds
+- Python 3.10+ is acceptable only for non-Windows-7 testing builds
 - Git
 - PyInstaller
 - Printer drivers for the printers used in the shop
@@ -66,7 +67,9 @@ Main modules:
 - `client/print_monitor.py`: spooler polling and print metadata capture
 - `server/api.py`: FastAPI routes for UI and monitor clients
 - `server/database.py`: billing logic, reporting queries, retention, backups
+- `network_discovery.py`: LAN auto-discovery for client-to-server connection
 - `ui/*`: operator interface (dashboard, services, settings, reports)
+- `PROMPT.md`: project memory / handover notes for future debugging and upgrades
 
 ## Runtime Modes
 
@@ -121,6 +124,8 @@ Example:
   "mode": "single",
   "server_ip": "192.168.1.50",
   "server_port": 8787,
+  "auto_discovery_enabled": true,
+  "discovery_port": 8788,
   "computer_name": "CLIENT-PC-01",
   "operator_id": "ADMIN",
   "poll_interval": 0.5,
@@ -132,6 +137,7 @@ Example:
 ```
 
 Settings can be edited from the UI Settings panel. Changes are saved back to `config/settings.json`.
+If `auto_discovery_enabled` is `true`, client machines will try to discover the admin server automatically on the LAN.
 
 ## Build Instructions
 
@@ -166,6 +172,12 @@ Create ready-to-copy ZIP packages:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1
+```
+
+If you are building on a newer Python only for local testing:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1 -AllowUnsupportedPython
 ```
 
 Generated files:
@@ -221,6 +233,8 @@ End users only need to double-click `CyberCafeManager.exe`.
 - Daily automatic SQLite backup
 - Light/Dark desktop UI theme
 - Idempotent multi-client print ingestion (simultaneous or retried submissions do not duplicate rows)
+- Automatic admin-server discovery for client PCs on the same LAN
+- In-memory retry queue so temporarily disconnected clients do not immediately lose captured jobs
 
 ## Troubleshooting
 
@@ -229,6 +243,7 @@ Printer not detected:
 - Verify printer driver installation.
 - Verify Print Spooler service is running.
 - Verify monitor mode is active and API is reachable.
+- Check `logs/application.log` for `Detected printers (...)` startup diagnostics.
 
 Spooler detection test (all printers):
 
@@ -281,6 +296,11 @@ Database busy/locked:
 - Avoid editing DB externally while app is running.
 - Run one central admin server (`CyberCafeServer.exe`) and connect clients through API.
 - Multiple client PCs can submit at the same time; server-side `source_job_key` idempotency prevents duplicate inserts.
+
+Windows 7 executable issue:
+
+- A build created with Python 3.13 / PySide6 is not a valid Windows 7 production build.
+- Build the final EXEs with Python 3.9 so the packaged application can run on Windows 7.
 
 Enable debug logs:
 

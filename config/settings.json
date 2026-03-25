@@ -2,6 +2,8 @@
   "mode": "single",
   "server_ip": "127.0.0.1",
   "server_port": 8787,
+  "auto_discovery_enabled": true,
+  "discovery_port": 8788,
   "computer_name": "ADMIN-PC",
   "operator_id": "ADMIN",
   "poll_interval": 0.5,

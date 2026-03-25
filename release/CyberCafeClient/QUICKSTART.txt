@@ -1,0 +1,7 @@
+CyberCafeClient Package
+
+1. Edit config\settings.json
+2. Set mode=client
+3. Keep auto_discovery_enabled=true or set central_server_url manually
+4. Set unique computer_name
+5. Start CyberCafeClient.exe

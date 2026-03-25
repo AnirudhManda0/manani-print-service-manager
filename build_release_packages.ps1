@@ -1,5 +1,6 @@
 param(
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$AllowUnsupportedPython
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,7 +16,11 @@ $clientExe = Join-Path $distDir "CyberCafeClient.exe"
 
 $pythonVersion = (python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
 if ($pythonVersion -ne "3.9") {
-    Write-Warning "Current Python is $pythonVersion. For best Windows 7 compatibility, build releases using Python 3.9."
+    $message = "Current Python is $pythonVersion. Windows 7 production builds must be created with Python 3.9."
+    if (-not $AllowUnsupportedPython) {
+        throw "$message Re-run with -AllowUnsupportedPython only for non-Windows-7 testing builds."
+    }
+    Write-Warning "$message Continuing because -AllowUnsupportedPython was provided."
 }
 
 if (-not $SkipBuild) {
@@ -57,16 +62,18 @@ CyberCafeServer Package
 
 1. Edit config\settings.json
 2. Set mode=server and server_ip/server_port
-3. Start CyberCafeServer.exe
+3. Keep auto_discovery_enabled=true for easier client connection
+4. Start CyberCafeServer.exe
 "@
 
 $clientQuickstart = @"
 CyberCafeClient Package
 
 1. Edit config\settings.json
-2. Set mode=client and central_server_url
-3. Set unique computer_name
-4. Start CyberCafeClient.exe
+2. Set mode=client
+3. Keep auto_discovery_enabled=true or set central_server_url manually
+4. Set unique computer_name
+5. Start CyberCafeClient.exe
 "@
 
 Set-Content -Path (Join-Path $serverDir "QUICKSTART.txt") -Value $serverQuickstart -Encoding ascii

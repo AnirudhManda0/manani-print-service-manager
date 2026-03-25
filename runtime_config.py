@@ -17,6 +17,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "mode": "single",
     "server_ip": "127.0.0.1",
     "server_port": 8787,
+    "auto_discovery_enabled": True,
+    "discovery_port": 8788,
     "computer_name": "",
     "operator_id": "ADMIN",
     "poll_interval": 0.5,
@@ -60,6 +62,10 @@ def normalize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
         cfg["server_ip"] = str(raw["server_ip"]).strip() or cfg["server_ip"]
     if raw.get("server_port") is not None:
         cfg["server_port"] = _safe_int(raw.get("server_port"), cfg["server_port"])
+    if raw.get("auto_discovery_enabled") is not None:
+        cfg["auto_discovery_enabled"] = bool(raw.get("auto_discovery_enabled"))
+    if raw.get("discovery_port") is not None:
+        cfg["discovery_port"] = _safe_int(raw.get("discovery_port"), cfg["discovery_port"])
     if raw.get("computer_name"):
         cfg["computer_name"] = str(raw.get("computer_name")).strip() or cfg["computer_name"]
     if raw.get("operator_id"):
@@ -105,6 +111,8 @@ def normalize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     # Guardrails.
     if not (1 <= cfg["server_port"] <= 65535):
         cfg["server_port"] = DEFAULT_CONFIG["server_port"]
+    if not (1 <= cfg["discovery_port"] <= 65535):
+        cfg["discovery_port"] = DEFAULT_CONFIG["discovery_port"]
     cfg["poll_interval"] = max(0.1, cfg["poll_interval"])
     cfg["bw_price_per_page"] = max(0.0, cfg["bw_price_per_page"])
     cfg["color_price_per_page"] = max(0.0, cfg["color_price_per_page"])
@@ -127,6 +135,8 @@ def serialize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "mode": normalized["mode"],
         "server_ip": normalized["server_ip"],
         "server_port": normalized["server_port"],
+        "auto_discovery_enabled": normalized["auto_discovery_enabled"],
+        "discovery_port": normalized["discovery_port"],
         "computer_name": normalized["computer_name"],
         "operator_id": normalized["operator_id"],
         "poll_interval": normalized["poll_interval"],

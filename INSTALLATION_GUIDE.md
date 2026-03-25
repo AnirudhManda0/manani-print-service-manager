@@ -2,6 +2,11 @@
 
 This guide is for technicians and shop owners to install, configure, and validate ManAni Print & Service Manager.
 
+Important build rule:
+
+- Final Windows 7 production EXEs must be built with Python 3.9.
+- Builds created with newer Python versions should be treated as local testing builds only.
+
 ## 1. Requirements
 
 - Windows machine with printer drivers installed
@@ -76,6 +81,8 @@ Open **Settings** and configure:
 
 - Server IP
 - Server Port
+- Auto discover server
+- Discovery port
 - Computer Name
 - Operator ID
 - Polling interval
@@ -130,6 +137,8 @@ python client/run_client.py --config config/settings.json
 
 Validate that print jobs from client PCs appear on the server dashboard/log.
 
+If `auto_discovery_enabled` is on, clients can find the admin server automatically on the local network instead of depending only on a hardcoded IP.
+
 Concurrency safety:
 
 - Multiple Windows 10 client PCs can submit print jobs at the same time.
@@ -165,6 +174,7 @@ Restore process:
 - [ ] Service record can be added from UI
 - [ ] Test print appears in print log with correct page count
 - [ ] Simultaneous print from 2 PCs appears as two separate transactions (no duplicates)
+- [ ] Client auto-discovers the server when fixed server URL is not manually entered
 - [ ] Dashboard revenue reflects printed pages (for example 18 pages x 2 INR = 36 INR)
 - [ ] Report shows B&W/Color and A3/A4 values
 - [ ] Add Service expression input works (for example `10 * 2` stores `20`)
