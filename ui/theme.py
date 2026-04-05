@@ -17,7 +17,7 @@ class Theme:
 LIGHT_THEME = Theme(
     name="light",
     background="#FFFFFF",
-    card_background="#F5F7FA",
+    card_background="#F8FAFC",
     primary_text="#1A1A1A",
     secondary_text="#555555",
     accent="#2E86DE",
@@ -73,12 +73,12 @@ class ThemeManager:
             font-size: 13px;
         }}
         QLabel#appTitle {{
-            font-size: 22px;
+            font-size: 26px;
             font-weight: 700;
             color: {t.primary_text};
         }}
         QLabel#sectionHeader {{
-            font-size: 16px;
+            font-size: 17px;
             font-weight: 700;
             color: {t.primary_text};
         }}
@@ -97,7 +97,7 @@ class ThemeManager:
             font-weight: 600;
         }}
         QLabel#statValue {{
-            font-size: 26px;
+            font-size: 22px;
             font-weight: 700;
             color: {t.primary_text};
         }}
@@ -115,14 +115,19 @@ class ThemeManager:
         QFrame#statCard, QFrame#reportStat {{
             background: {t.card_background};
             border: 1px solid {t.border};
-            border-radius: 10px;
+            border-radius: 12px;
         }}
 
         QFrame#statCard[accent="blue"], QFrame#statCard[accent="cyan"],
         QFrame#statCard[accent="orange"], QFrame#statCard[accent="green"],
         QFrame#statCard[accent="gold"] {{
-            border-left: 5px solid {t.accent};
+            border-width: 1px;
         }}
+        QFrame#statCard[accent="blue"] {{ border-color: #BFDBFE; }}
+        QFrame#statCard[accent="cyan"] {{ border-color: #BAE6FD; }}
+        QFrame#statCard[accent="orange"] {{ border-color: #FED7AA; }}
+        QFrame#statCard[accent="green"] {{ border-color: #BBF7D0; }}
+        QFrame#statCard[accent="gold"] {{ border-color: #FDE68A; }}
 
         QPushButton {{
             min-height: 38px;
@@ -146,10 +151,12 @@ class ThemeManager:
             background: {t.accent};
         }}
         QPushButton#serviceActionButton {{
-            min-height: 90px;
-            font-size: 13px;
+            min-height: 56px;
+            max-height: 62px;
+            font-size: 12px;
             font-weight: 700;
-            padding: 10px;
+            padding: 8px 12px;
+            text-align: left;
         }}
         QPushButton#tableDeleteButton {{
             min-height: 24px;
@@ -188,11 +195,14 @@ class ThemeManager:
             border-radius: 8px;
             alternate-background-color: {t.table_alt};
         }}
+        QTableWidget::item {{
+            padding: 4px 6px;
+        }}
         QHeaderView::section {{
             background: {t.card_background};
             color: {t.primary_text};
             border: 1px solid {t.border};
-            padding: 6px;
+            padding: 8px 6px;
             font-size: 13px;
             font-weight: 700;
         }}
@@ -205,13 +215,13 @@ class ThemeManager:
         QTabWidget::pane {{
             border: 1px solid {t.border};
             border-radius: 8px;
-            margin-left: 8px;
+            margin-top: 18px;
         }}
         QTabBar::tab {{
-            min-width: 130px;
-            min-height: 48px;
-            margin: 4px;
-            padding: 10px;
+            min-width: 120px;
+            min-height: 40px;
+            margin-right: 6px;
+            padding: 8px 12px;
             color: {t.primary_text};
             background: transparent;
             border: 1px solid {t.border};

@@ -21,6 +21,7 @@ from ui.qt import (
     QWidget,
 )
 
+from ui.charts import ChartCard, ContributionChart, RevenueTrendChart
 from ui.formatting import format_currency
 
 
@@ -102,6 +103,16 @@ class ReportsPanel(QWidget):
         self.stat_grid.addWidget(self.stat_total_rev, 2, 0, 1, 2)
         layout.addLayout(self.stat_grid)
 
+        self.chart_grid = QGridLayout()
+        self.chart_grid.setSpacing(12)
+        self.chart_grid.setColumnStretch(0, 1)
+        self.chart_grid.setColumnStretch(1, 1)
+        self.revenue_chart = RevenueTrendChart()
+        self.contribution_chart = ContributionChart()
+        self.chart_grid.addWidget(ChartCard("Revenue Trend", self.revenue_chart), 0, 0)
+        self.chart_grid.addWidget(ChartCard("Print vs Service Contribution", self.contribution_chart), 0, 1)
+        layout.addLayout(self.chart_grid)
+
         self.summary_box = QTextEdit()
         self.summary_box.setReadOnly(True)
         self.summary_box.setMinimumHeight(120)
@@ -153,6 +164,13 @@ class ReportsPanel(QWidget):
         self.stat_services.set_value(str(summary.get("total_services", 0)))
         self.stat_print_rev.set_value(format_currency(currency, summary.get("printing_revenue", 0)))
         self.stat_total_rev.set_value(format_currency(currency, summary.get("total_revenue", 0)))
+        self.revenue_chart.set_data(report.get("trend_points", []), currency)
+        contribution = report.get("contribution", {})
+        self.contribution_chart.set_data(
+            contribution.get("printing_revenue", 0.0),
+            contribution.get("service_revenue", 0.0),
+            currency,
+        )
 
         items = report.get("services_breakdown", [])
         self.service_table.setRowCount(len(items))

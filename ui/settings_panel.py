@@ -153,7 +153,11 @@ class SettingsPanel(QWidget):
                 self.autostart_enabled.setToolTip("Autostart is only available on Windows.")
             else:
                 self.autostart_enabled.setEnabled(True)
-                self.autostart_enabled.setToolTip("Starts PrintX in background when Windows starts.")
+                registry_state = "on" if bool(system_data.get("autostart_registry_enabled", False)) else "off"
+                shortcut_state = "on" if bool(system_data.get("autostart_startup_shortcut_enabled", False)) else "off"
+                self.autostart_enabled.setToolTip(
+                    f"Starts PrintX in background when Windows starts. Registry: {registry_state}. Startup shortcut: {shortcut_state}."
+                )
             self.poll_interval.setValue(float(system_data.get("poll_interval", 0.5)))
             self.bw_price.setValue(float(data.get("bw_price_per_page", 2.0)))
             self.color_price.setValue(float(data.get("color_price_per_page", 10.0)))

@@ -40,17 +40,7 @@ Use this checklist before every production rollout.
 
 ### Test: dashboard totals after printing
 
-- Expected result: dashboard cards update after refresh timer or manual refresh
-- Actual result:
-
-### Test: revenue trend chart
-
-- Expected result: last 7 days chart renders without crash
-- Actual result:
-
-### Test: print vs service contribution chart
-
-- Expected result: contribution bars render and match report totals
+- Expected result: dashboard KPI cards update after refresh timer or manual refresh
 - Actual result:
 
 ## Services
@@ -69,7 +59,7 @@ Use this checklist before every production rollout.
 
 ### Test: daily report
 
-- Expected result: totals match the day’s dashboard
+- Expected result: totals match the selected day
 - Actual result:
 
 ### Test: weekly report
@@ -80,6 +70,16 @@ Use this checklist before every production rollout.
 ### Test: monthly report
 
 - Expected result: totals match the full month range
+- Actual result:
+
+### Test: report revenue trend chart
+
+- Expected result: the report screen chart renders without crash or overlap
+- Actual result:
+
+### Test: report contribution chart
+
+- Expected result: the report contribution bars match print vs service totals
 - Actual result:
 
 ## Multi-Client

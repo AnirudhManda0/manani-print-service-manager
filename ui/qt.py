@@ -4,6 +4,7 @@ try:  # pragma: no cover - import resolution depends on target runtime.
     from PySide2.QtCore import QDate, QEvent, QObject, QSize, QTimer, Qt, Signal
     from PySide2.QtGui import QAction, QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
     from PySide2.QtWidgets import (
+        QAbstractItemView,
         QAbstractScrollArea,
         QApplication,
         QComboBox,
@@ -36,6 +37,7 @@ except ImportError:  # pragma: no cover - fallback for older runtime stacks.
     from PySide6.QtCore import QDate, QEvent, QObject, QSize, QTimer, Qt, Signal
     from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
     from PySide6.QtWidgets import (
+        QAbstractItemView,
         QAbstractScrollArea,
         QApplication,
         QComboBox,

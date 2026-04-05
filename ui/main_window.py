@@ -12,8 +12,9 @@ UI widgets never write directly to SQLite; all data flows through API client cal
 import os
 from datetime import datetime
 
-from branding import APP_FULL_NAME, APP_NAME, icon_path, logo_path
+from branding import APP_FULL_NAME, APP_NAME, APP_SUBTITLE, icon_path, logo_path
 from ui.qt import (
+    QAbstractItemView,
     QComboBox,
     Qt,
     QAction,
@@ -41,6 +42,7 @@ from ui.qt import (
 
 from ui.dashboard import DashboardPanel
 from ui.formatting import format_currency
+from ui.catalog_panel import CatalogPanel
 from ui.reports_panel import ReportsPanel
 from ui.resources import ui_resource_path
 from ui.services_panel import ServicesPanel
@@ -67,7 +69,7 @@ class MainWindow(QMainWindow):
         self._is_exiting = False
         self.background_supported = False
         self.theme_manager = ThemeManager()
-        self.setWindowTitle(f"{APP_FULL_NAME} v{self.app_version}")
+        self.setWindowTitle(f"{APP_NAME} v{self.app_version}")
         self.resize(1280, 820)
         self.setMinimumSize(1100, 700)
         app_icon_path = icon_path()
@@ -77,20 +79,20 @@ class MainWindow(QMainWindow):
         container = QWidget()
         self.setCentralWidget(container)
         root = QVBoxLayout(container)
-        root.setContentsMargins(14, 14, 14, 10)
-        root.setSpacing(12)
+        root.setContentsMargins(18, 14, 18, 12)
+        root.setSpacing(14)
 
         # Top ribbon: app title, dashboard date selector, theme toggle, and live clock.
         header = QHBoxLayout()
-        header.setSpacing(10)
+        header.setSpacing(12)
         logo_label = QLabel()
         logo = QPixmap(logo_path())
         if not logo.isNull():
-            logo_label.setPixmap(logo.scaled(42, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            logo_label.setPixmap(logo.scaledToHeight(52, Qt.SmoothTransformation))
             header.addWidget(logo_label)
-        title = QLabel(APP_FULL_NAME)
+        title = QLabel(APP_NAME)
         title.setObjectName("appTitle")
-        subtitle = QLabel("POS Console")
+        subtitle = QLabel(APP_SUBTITLE)
         subtitle.setObjectName("secondaryLabel")
         version_label = QLabel(f"v{self.app_version}")
         version_label.setObjectName("secondaryLabel")
@@ -108,9 +110,9 @@ class MainWindow(QMainWindow):
         self.clock_label = QLabel()
         self.clock_label.setObjectName("clockLabel")
         header.addWidget(title)
-        header.addSpacing(8)
+        header.addSpacing(10)
         header.addWidget(subtitle)
-        header.addSpacing(6)
+        header.addSpacing(8)
         header.addWidget(version_label)
         header.addStretch()
         header.addWidget(dash_date_label)
@@ -120,15 +122,15 @@ class MainWindow(QMainWindow):
         header.addWidget(self.clock_label)
         root.addLayout(header)
 
-        # Dashboard cards are wrapped in a scroll area for smaller displays.
         self.dashboard = DashboardPanel()
-        root.addWidget(self._wrap_scroll(self.dashboard), 0)
+        root.addWidget(self.dashboard, 0)
+        root.addSpacing(48)
 
         # Main content area uses tabbed pages.
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.tabs.setTabPosition(QTabWidget.West)
-        self.tabs.setIconSize(QSize(18, 18))
+        self.tabs.setTabPosition(QTabWidget.North)
+        self.tabs.setIconSize(QSize(16, 16))
         root.addWidget(self.tabs, 1)
 
         self.print_log_tab = self._build_print_log_tab()
@@ -136,7 +138,7 @@ class MainWindow(QMainWindow):
 
         self.services_panel = ServicesPanel(self.api)
         self.services_panel.service_recorded.connect(self.refresh_all)
-        self.tabs.addTab(self._wrap_scroll(self.services_panel), self._icon("services.svg"), "Services")
+        self.tabs.addTab(self.services_panel, self._icon("services.svg"), "Services")
 
         self.reports_panel = ReportsPanel(self.api)
         self.tabs.addTab(self._wrap_scroll(self.reports_panel), self._icon("reports.svg"), "Reports")
@@ -144,6 +146,9 @@ class MainWindow(QMainWindow):
         self.settings_panel = SettingsPanel(self.api)
         self.settings_panel.settings_saved.connect(self.refresh_all)
         self.tabs.addTab(self._wrap_scroll(self.settings_panel), self._icon("settings.svg"), "Settings")
+
+        self.catalog_panel = CatalogPanel(self.api)
+        self.tabs.addTab(self._wrap_scroll(self.catalog_panel), self._icon("database.svg"), "Catalog")
 
         self.statusBar().showMessage("Ready")
         self.apply_theme()
@@ -222,21 +227,37 @@ class MainWindow(QMainWindow):
         self.print_log_table.setHorizontalHeaderLabels(
             ["Time", "Operator", "Computer", "Printer", "Pages", "Document", "Print Type", "Paper", "Cost", "Delete"]
         )
-        header = self.print_log_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.Stretch)
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(9, QHeaderView.Fixed)
-        self.print_log_table.setColumnWidth(9, 80)
-        self.print_log_table.verticalHeader().setDefaultSectionSize(42)
         self.print_log_table.setAlternatingRowColors(True)
         self.print_log_table.setWordWrap(False)
+        self.print_log_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.print_log_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.print_log_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.print_log_table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.print_log_table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.print_log_table.verticalHeader().setVisible(False)
+        self.print_log_table.verticalHeader().setDefaultSectionSize(38)
+        header = self.print_log_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.Fixed)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        header.setSectionResizeMode(5, QHeaderView.Stretch)
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        header.setSectionResizeMode(7, QHeaderView.Fixed)
+        header.setSectionResizeMode(8, QHeaderView.Fixed)
+        header.setSectionResizeMode(9, QHeaderView.Fixed)
+        self.print_log_table.setColumnWidth(0, 152)
+        self.print_log_table.setColumnWidth(1, 110)
+        self.print_log_table.setColumnWidth(2, 132)
+        self.print_log_table.setColumnWidth(3, 220)
+        self.print_log_table.setColumnWidth(4, 72)
+        self.print_log_table.setColumnWidth(6, 120)
+        self.print_log_table.setColumnWidth(7, 90)
+        self.print_log_table.setColumnWidth(8, 110)
+        self.print_log_table.setColumnWidth(9, 84)
+        self.print_log_table.cellDoubleClicked.connect(self._handle_print_log_double_click)
         layout.addWidget(self.print_log_table)
         return tab
 
@@ -252,12 +273,12 @@ class MainWindow(QMainWindow):
         if tray_icon.isNull():
             tray_icon = self._icon("dashboard.svg")
         self._tray_icon = QSystemTrayIcon(tray_icon, self)
-        self._tray_icon.setToolTip(APP_FULL_NAME)
+        self._tray_icon.setToolTip(APP_NAME)
         tray_menu = QMenu(self)
         open_action = tray_menu.addAction(f"Open {APP_NAME}")
         hide_action = tray_menu.addAction("Hide Window")
         tray_menu.addSeparator()
-        exit_action = tray_menu.addAction("Exit")
+        exit_action = tray_menu.addAction("Exit Completely")
         open_action.triggered.connect(self.show_from_tray)
         hide_action.triggered.connect(self.hide_to_tray)
         exit_action.triggered.connect(self.exit_application)
@@ -324,6 +345,7 @@ class MainWindow(QMainWindow):
         self.load_dashboard()
         self.load_print_jobs()
         self.services_panel.refresh_services()
+        self.catalog_panel.refresh_data()
 
     def load_dashboard(self, *_args) -> None:
         day = self.dashboard_date.date().toString("yyyy-MM-dd")
@@ -360,13 +382,15 @@ class MainWindow(QMainWindow):
         self.print_log_table.setRowCount(len(rows))
         for idx, item in enumerate(rows):
             job_id = int(item.get("id", 0))
-            self.print_log_table.setItem(idx, 0, QTableWidgetItem(item.get("timestamp", "")))
+            time_item = QTableWidgetItem(item.get("timestamp", ""))
+            time_item.setData(Qt.UserRole, job_id)
+            self.print_log_table.setItem(idx, 0, time_item)
             self.print_log_table.setItem(idx, 1, QTableWidgetItem(item.get("operator_id", "ADMIN")))
             self.print_log_table.setItem(idx, 2, QTableWidgetItem(item.get("computer_name", "")))
             self.print_log_table.setItem(idx, 3, QTableWidgetItem(item.get("printer_name", "")))
             self.print_log_table.setItem(idx, 4, QTableWidgetItem(str(item.get("pages", 0))))
             self.print_log_table.setItem(idx, 5, QTableWidgetItem(item.get("document_name", "")))
-            self.print_log_table.setItem(idx, 6, QTableWidgetItem(item.get("print_type", "")))
+            self.print_log_table.setItem(idx, 6, QTableWidgetItem(str(item.get("print_type", "")).replace("_", " ")))
             self.print_log_table.setItem(idx, 7, QTableWidgetItem(item.get("paper_size", "Unknown")))
             self.print_log_table.setItem(idx, 8, QTableWidgetItem(format_currency(currency, item.get("total_cost", 0))))
             delete_btn = QPushButton("Delete")
@@ -383,6 +407,7 @@ class MainWindow(QMainWindow):
             for col in (0, 1, 2, 3, 4, 5, 6, 7, 8):
                 cell = self.print_log_table.item(idx, col)
                 if cell is not None:
+                    cell.setToolTip(cell.text())
                     cell.setTextAlignment(Qt.AlignVCenter | (Qt.AlignCenter if col in {4, 8} else Qt.AlignLeft))
 
         self.statusBar().showMessage(f"Loaded {len(rows)} print jobs for {day}")
@@ -402,6 +427,36 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Deleted print transaction ID {job_id}")
         except Exception as exc:
             QMessageBox.warning(self, "Delete Error", f"Unable to delete transaction.\n{exc}")
+
+    def _handle_print_log_double_click(self, row: int, column: int) -> None:
+        if column != 6:
+            return
+        type_cell = self.print_log_table.item(row, 6)
+        timestamp_cell = self.print_log_table.item(row, 0)
+        if type_cell is None:
+            return
+        current = str(type_cell.text()).strip().lower().replace(" ", "_")
+        new_type = "color" if current == "black_and_white" else "black_and_white"
+        job_id = timestamp_cell.data(Qt.UserRole) if timestamp_cell is not None else None
+        timestamp = timestamp_cell.text() if timestamp_cell is not None else "selected job"
+        response = QMessageBox.question(
+            self,
+            "Correct Print Type",
+            f"Change print type for {timestamp} to '{new_type.replace('_', ' ')}'?\n\nThis will recalculate billing.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if response != QMessageBox.Yes:
+            return
+
+        try:
+            if not job_id:
+                raise ValueError("Could not resolve the selected job for correction.")
+            self.api.update_print_job_type(int(job_id), new_type)
+            self.refresh_all()
+            self.statusBar().showMessage(f"Corrected print type to {new_type.replace('_', ' ')}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Correction Error", f"Unable to update print type.\n{exc}")
 
     def _update_clock(self) -> None:
         self.clock_label.setText(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

@@ -18,6 +18,7 @@ Check:
 - Print Spooler service is running
 - `PRINTX_LOG_LEVEL=DEBUG` is enabled for diagnosis
 - `test_spooler_detection.py` lists the printer
+- `logs/printx.log` shows `Detected printer` and `Checking queue`
 
 ## Page Count Is Wrong
 
@@ -26,6 +27,14 @@ Check:
 - print job is not being recorded too early
 - the job reaches a final spooler state with `TotalPages` or `PagesPrinted`
 - logs contain `Pages detected` before `Job recorded`
+
+## Color vs B&W Billing Looks Wrong
+
+Check:
+
+- the printer driver exposes `DEVMODE.dmColor` correctly
+- `logs/printx.log` does not show the fallback warning about defaulting to black and white
+- the printer is configured with the correct color capability in Windows
 
 ## Duplicate Transactions
 

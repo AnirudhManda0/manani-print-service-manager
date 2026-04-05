@@ -43,15 +43,23 @@ Output:
 - stores SQLite database
 - runs dashboard and reports
 - can also monitor local prints
+- can start silently with `--background` while keeping monitoring active
 
 ### Client PC
 
 - mode: `client`
 - monitors installed printers
 - sends print transactions to the central server
+- can auto-discover the server on the LAN when configured
 
 ## Backup Strategy
 
 - PrintX creates daily backups under `backup/`
 - keep periodic external backups of the `database/` folder
 - update executables without deleting `database/` or `config/`
+
+## Background Startup
+
+- Enable Auto Start from Settings on each production PC.
+- PrintX creates both the registry entry and Startup shortcut.
+- Startup launches the app in background mode so print monitoring starts immediately after login.

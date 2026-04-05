@@ -502,6 +502,69 @@ class Database:
             logger.info("Print job deleted: id=%s", job_id)
         return deleted
 
+    def update_print_job_type(self, job_id: int, print_type: str) -> Dict[str, object]:
+        """Correct one print job classification and recalculate billing safely."""
+        safe_type = "color" if print_type == "color" else "black_and_white"
+        settings = self.get_settings()
+        price_per_page = (
+            self._money(settings["color_price_per_page"])
+            if safe_type == "color"
+            else self._money(settings["bw_price_per_page"])
+        )
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT
+                    id,
+                    operator_id,
+                    computer_name,
+                    printer_name,
+                    document_name,
+                    source_job_key,
+                    pages,
+                    print_type,
+                    paper_size,
+                    timestamp
+                FROM print_jobs
+                WHERE id = ?;
+                """,
+                (int(job_id),),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"print job {job_id} not found")
+
+            total_cost = (price_per_page * Decimal(int(row["pages"]))).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+            self._conn.execute(
+                """
+                UPDATE print_jobs
+                SET print_type = ?, price_per_page = ?, total_cost = ?
+                WHERE id = ?;
+                """,
+                (
+                    safe_type,
+                    self._money_float(price_per_page),
+                    self._money_float(total_cost),
+                    int(job_id),
+                ),
+            )
+            self._conn.commit()
+
+        logger.info("Print job type corrected: id=%s new_type=%s total=%s", job_id, safe_type, total_cost)
+        return {
+            "id": int(row["id"]),
+            "operator_id": row["operator_id"],
+            "computer_name": row["computer_name"],
+            "printer_name": row["printer_name"],
+            "document_name": row["document_name"],
+            "source_job_key": row["source_job_key"],
+            "pages": int(row["pages"]),
+            "print_type": safe_type,
+            "paper_size": row["paper_size"],
+            "price_per_page": self._money_float(price_per_page),
+            "total_cost": self._money_float(total_cost),
+            "timestamp": row["timestamp"],
+        }
+
     def add_service_catalog(self, service_name: str, default_price: float) -> Dict[str, object]:
         safe_price = self._money(default_price)
         with self._lock:
@@ -527,6 +590,30 @@ class Database:
             rows = self._conn.execute(
                 "SELECT id, service_name, default_price FROM services_catalog ORDER BY service_name ASC;"
             ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_service_records(self, limit: int = 200, date_filter: Optional[str] = None) -> List[Dict[str, object]]:
+        sql = """
+            SELECT
+                sr.id,
+                sr.service_id,
+                sc.service_name,
+                sr.price,
+                sr.timestamp
+            FROM service_records sr
+            JOIN services_catalog sc ON sc.id = sr.service_id
+        """
+        params: Tuple[object, ...]
+        if date_filter:
+            sql += " WHERE date(sr.timestamp) = date(?) "
+            params = (date_filter,)
+        else:
+            params = tuple()
+        sql += " ORDER BY sr.timestamp DESC LIMIT ?;"
+        params = params + (int(limit),)
+
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def record_service(
@@ -709,6 +796,66 @@ class Database:
             )
         return points
 
+    def _trend_points_for_period(self, period: str, anchor_day: Optional[str]) -> List[Dict[str, object]]:
+        if period == "daily":
+            return self._daily_trend_points(anchor_day=anchor_day, days=7)
+
+        if anchor_day:
+            base_day = datetime.strptime(anchor_day, "%Y-%m-%d").date()
+        else:
+            base_day = date.today()
+
+        points: List[Dict[str, object]] = []
+        if period == "weekly":
+            start_of_week = base_day - timedelta(days=base_day.weekday())
+            for offset in range(7, -1, -1):
+                week_start = start_of_week - timedelta(weeks=offset)
+                week_end = week_start + timedelta(days=7)
+                revenue = self._revenue_between(
+                    f"{week_start.isoformat()} 00:00:00",
+                    f"{week_end.isoformat()} 00:00:00",
+                )
+                total = self._money(
+                    Decimal(str(revenue["printing_revenue"])) + Decimal(str(revenue["service_revenue"]))
+                )
+                points.append(
+                    {
+                        "date": week_start.isoformat(),
+                        "label": f"Wk {week_start.strftime('%d %b')}",
+                        "total_revenue": self._money_float(total),
+                        "printing_revenue": revenue["printing_revenue"],
+                        "service_revenue": revenue["service_revenue"],
+                    }
+                )
+            return points
+
+        if period == "monthly":
+            month_start = base_day.replace(day=1)
+            for offset in range(5, -1, -1):
+                ref = month_start
+                for _ in range(offset):
+                    ref = (ref.replace(day=1) - timedelta(days=1)).replace(day=1)
+                next_month = (ref.replace(day=28) + timedelta(days=4)).replace(day=1)
+                revenue = self._revenue_between(
+                    f"{ref.isoformat()} 00:00:00",
+                    f"{next_month.isoformat()} 00:00:00",
+                )
+                total = self._money(
+                    Decimal(str(revenue["printing_revenue"])) + Decimal(str(revenue["service_revenue"]))
+                )
+                points.append(
+                    {
+                        "date": ref.isoformat(),
+                        "label": ref.strftime("%b %y"),
+                        "total_revenue": self._money_float(total),
+                        "printing_revenue": revenue["printing_revenue"],
+                        "service_revenue": revenue["service_revenue"],
+                    }
+                )
+            return points
+
+        return self._daily_trend_points(anchor_day=anchor_day, days=7)
+
     def get_report(self, period: str, day: Optional[str] = None) -> Dict[str, object]:
         """Period report endpoint backing Reports tab."""
         start_ts, end_ts, label = self._range_from_period(period, day)
@@ -725,6 +872,11 @@ class Database:
             "summary": {
                 **revenue,
                 "total_revenue": self._money_float(total),
+            },
+            "trend_points": self._trend_points_for_period(period=period, anchor_day=day),
+            "contribution": {
+                "printing_revenue": revenue["printing_revenue"],
+                "service_revenue": revenue["service_revenue"],
             },
             "services_breakdown": services,
         }

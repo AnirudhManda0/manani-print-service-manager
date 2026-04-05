@@ -22,6 +22,7 @@ database/*.db
 
 # Local environment and logs
 .env
+.venv-win7/
 *.log
 logs/
 backup/
@@ -36,6 +37,14 @@ docs/~$*.docx
 # Packaged binaries and temporary portability checks
 *.exe
 releases/*/*.zip
+releases/*/config/
+releases/*/database/
+releases/*/logs/
+releases/*/backup/
+releases/windows10/final_fix_pass/
+releases/windows10/fresh_build/
+releases/windows10/ui_reopen_fix/
+releases/windows7/final_fix_pass/
 portable_*/
 
 # Test/runtime temp folders

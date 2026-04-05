@@ -44,6 +44,12 @@ PrintX creates these folders automatically beside the executable when needed:
 ## Auto Start
 
 Auto-start is configured from Settings.
-When enabled, PrintX writes a registry entry under:
+When enabled, PrintX writes both:
 
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+
+and a Startup-folder shortcut under:
+
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\PrintX.lnk`
+
+Both startup paths launch PrintX with the `--background` flag so monitoring begins without opening the dashboard.

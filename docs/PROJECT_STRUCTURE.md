@@ -7,7 +7,7 @@
 - `branding.py`
   Central app naming, logo, icon, executable, and database file constants.
 - `autostart.py`
-  Windows auto-start registry integration.
+  Windows auto-start integration for both registry and Startup-folder shortcut.
 - `runtime_config.py`
   Loads, validates, normalizes, and recreates `config/settings.json`.
 - `network_discovery.py`
@@ -38,11 +38,13 @@
 - `ui/main_window.py`
   Main operator shell, dashboard, tray behavior, and print log.
 - `ui/dashboard.py`
-  KPI cards and chart widgets.
+  Compact KPI cards used by the dashboard.
+- `ui/charts.py`
+  Reusable revenue and contribution charts shared by reports.
 - `ui/services_panel.py`
   Service catalog display and confirmation-based service recording.
 - `ui/reports_panel.py`
-  Period reporting UI.
+  Period reporting UI with charts and service breakdowns.
 - `ui/settings_panel.py`
   Runtime configuration editor.
 - `ui/api_client.py`
@@ -74,7 +76,7 @@
 - `releases/windows7`
   Legacy Windows 7 release payloads.
 - `logs/`
-  Rotating app logs.
+  Rotating app logs, including `logs/printx.log`.
 - `backup/`
   Daily SQLite backups.
 
@@ -86,7 +88,7 @@
 4. Print monitor starts and enumerates printers.
 5. New jobs are posted to FastAPI.
 6. FastAPI writes validated transactions to SQLite.
-7. UI refreshes dashboard, logs, and reports from API responses.
+7. UI refreshes dashboard KPI cards, print log, and reports from API responses.
 8. Closing the window hides PrintX to the tray so monitoring can continue.
 
 ## Data Flow

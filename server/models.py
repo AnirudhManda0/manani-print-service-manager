@@ -16,6 +16,10 @@ class PrintJobCreate(BaseModel):
     timestamp: Optional[datetime] = None
 
 
+class PrintJobTypeUpdate(BaseModel):
+    print_type: Literal["black_and_white", "color"]
+
+
 class ServiceCatalogCreate(BaseModel):
     service_name: str = Field(..., min_length=1, max_length=200)
     default_price: float = Field(..., ge=0)

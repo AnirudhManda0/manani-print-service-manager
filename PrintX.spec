@@ -18,6 +18,8 @@ hiddenimports = [
     "pythoncom",
     "pywintypes",
     "win32api",
+    "win32com",
+    "win32com.client",
     "win32print",
     "win32con",
     "win32file",

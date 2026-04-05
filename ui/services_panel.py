@@ -144,8 +144,8 @@ class ServicesPanel(QWidget):
         self.currency = "INR"
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(12)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(14)
 
         top_bar = QHBoxLayout()
         title = QLabel("Services")
@@ -153,8 +153,8 @@ class ServicesPanel(QWidget):
         subtitle = QLabel("Tap a service button to record instantly")
         subtitle.setObjectName("secondaryLabel")
         self.add_btn = QPushButton("Add Service")
-        self.add_btn.setMinimumHeight(54)
-        self.add_btn.setMinimumWidth(180)
+        self.add_btn.setMinimumHeight(44)
+        self.add_btn.setMinimumWidth(170)
         self.add_btn.setProperty("variant", "primary")
         self.add_btn.clicked.connect(self.open_add_dialog)
         top_bar.addWidget(title)
@@ -170,10 +170,15 @@ class ServicesPanel(QWidget):
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("border: none; background: transparent;")
         self.scroll_container = QWidget()
         self.grid = QGridLayout(self.scroll_container)
-        self.grid.setSpacing(12)
+        self.grid.setContentsMargins(8, 8, 8, 8)
+        self.grid.setHorizontalSpacing(14)
+        self.grid.setVerticalSpacing(14)
         self.scroll.setWidget(self.scroll_container)
+        self.scroll.setMinimumHeight(150)
+        self.scroll.setMaximumHeight(200)
         root.addWidget(self.scroll)
 
         self.refresh_services()
@@ -193,16 +198,21 @@ class ServicesPanel(QWidget):
         self.service_buttons.clear()
 
         for i, service in enumerate(self.services):
-            btn = QPushButton(f"{service['service_name']}\n{format_currency(self.currency, service['default_price'])}")
-            btn.setMinimumHeight(96)
-            btn.setMinimumWidth(210)
+            btn = QPushButton(
+                f"{service['service_name']}  |  {format_currency(self.currency, service['default_price'])}"
+            )
+            btn.setMinimumHeight(58)
+            btn.setMaximumHeight(62)
+            btn.setMinimumWidth(240)
             btn.setObjectName("serviceActionButton")
-            btn.setProperty("variant", "primary")
             btn.clicked.connect(lambda checked=False, s=service: self.record_service(s))
-            row = i // 4
-            col = i % 4
+            row = i // 3
+            col = i % 3
             self.grid.addWidget(btn, row, col)
             self.service_buttons.append(btn)
+        for col in range(3):
+            self.grid.setColumnStretch(col, 1)
+
         if not self.services:
             self.status_label.setText("No services yet. Use Add Service to create your first service.")
         else:

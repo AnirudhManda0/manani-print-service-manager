@@ -20,6 +20,7 @@ from server.database import Database
 from server.models import (
     DataRetentionExecute,
     PrintJobCreate,
+    PrintJobTypeUpdate,
     ServiceCatalogCreate,
     ServiceRecordCreate,
     SettingsUpdate,
@@ -113,6 +114,8 @@ def create_app(
             "operator_id": cfg.get("operator_id", "ADMIN"),
             "autostart_enabled": bool(cfg.get("autostart_enabled", autostart.get("enabled", False))),
             "autostart_supported": bool(autostart.get("supported", False)),
+            "autostart_registry_enabled": bool(autostart.get("registry_enabled", False)),
+            "autostart_startup_shortcut_enabled": bool(autostart.get("startup_shortcut_enabled", False)),
             "poll_interval": float(cfg.get("poll_interval", 0.5)),
             "bw_price_per_page": float(cfg.get("bw_price_per_page", 2.0)),
             "color_price_per_page": float(cfg.get("color_price_per_page", 10.0)),
@@ -137,6 +140,7 @@ def create_app(
         )
         saved = save_config_file(cfg_path, cfg)
         autostart_state = set_autostart_enabled(bool(saved.get("autostart_enabled", False)))
+        autostart = get_autostart_status()
         return {
             "server_ip": saved.get("server_ip"),
             "server_port": int(saved.get("server_port", 8787)),
@@ -145,7 +149,9 @@ def create_app(
             "computer_name": saved.get("computer_name"),
             "operator_id": saved.get("operator_id", "ADMIN"),
             "autostart_enabled": autostart_state,
-            "autostart_supported": bool(get_autostart_status().get("supported", False)),
+            "autostart_supported": bool(autostart.get("supported", False)),
+            "autostart_registry_enabled": bool(autostart.get("registry_enabled", False)),
+            "autostart_startup_shortcut_enabled": bool(autostart.get("startup_shortcut_enabled", False)),
             "poll_interval": float(saved.get("poll_interval", 0.5)),
             "bw_price_per_page": float(saved.get("bw_price_per_page", 2.0)),
             "color_price_per_page": float(saved.get("color_price_per_page", 10.0)),
@@ -205,6 +211,13 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"print job {job_id} not found")
         return {"deleted": True, "id": job_id}
 
+    @app.put("/api/print-jobs/{job_id}/type")
+    def update_print_job_type(job_id: int, payload: PrintJobTypeUpdate) -> dict:
+        try:
+            return db.update_print_job_type(job_id=job_id, print_type=payload.print_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.get("/api/dashboard")
     def get_dashboard(date: Optional[str] = Query(default=None, description="YYYY-MM-DD")) -> dict:
         # Dashboard is a daily summary view; UI updates cards from this payload.
@@ -213,6 +226,13 @@ def create_app(
     @app.get("/api/services/catalog")
     def list_service_catalog() -> dict:
         return {"items": db.list_services_catalog()}
+
+    @app.get("/api/services/records")
+    def list_service_records(
+        date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+        limit: int = Query(default=200, ge=1, le=5000),
+    ) -> dict:
+        return {"items": db.list_service_records(limit=limit, date_filter=date)}
 
     @app.post("/api/services/catalog")
     def add_service_catalog(payload: ServiceCatalogCreate) -> dict:

@@ -23,6 +23,7 @@ import uvicorn
 
 from branding import APP_FULL_NAME, DEFAULT_DATABASE_NAME
 from client.print_monitor import PrintMonitor, run_background_client
+from instance_bridge import InstanceBridgeServer, send_control_message
 from network_discovery import DEFAULT_DISCOVERY_PORT, ServerDiscoveryResponder
 from runtime_config import load_config_file, normalize_config, save_config_file
 from server.api import create_app
@@ -35,7 +36,7 @@ def configure_logging() -> None:
     """Configure console + rotating file logs for production and packaged runtime."""
     logs_dir = os.path.join(install_root(), "logs")
     os.makedirs(logs_dir, exist_ok=True)
-    log_file = os.path.join(logs_dir, "application.log")
+    log_file = os.path.join(logs_dir, "printx.log")
     level_name = os.environ.get("PRINTX_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
 
@@ -201,17 +202,39 @@ def run_with_ui(
     start_hidden: bool = False,
 ) -> None:
     """Start Qt event loop and connect UI to API."""
-    from ui.qt import QApplication
+    from ui.qt import QApplication, QTimer
 
     from ui.api_client import APIClient
     from ui.main_window import MainWindow
 
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     client = APIClient(api_url)
     window = MainWindow(client, app_version=app_version, start_hidden=start_hidden)
+    bridge = InstanceBridgeServer(
+        on_message=lambda payload: QTimer.singleShot(
+            0,
+            window.show_from_tray if payload == "SHOW_UI" else lambda: None,
+        )
+    )
+    bridge.start()
+    app._printx_instance_bridge = bridge  # type: ignore[attr-defined]
+    if monitor is not None:
+        monitor_guard = QTimer()
+        monitor_guard.setInterval(5000)
+
+        def _restart_monitor_if_needed() -> None:
+            if not monitor.is_running:
+                logging.warning("Print monitor stopped unexpectedly. Restarting.")
+                monitor.start()
+
+        monitor_guard.timeout.connect(_restart_monitor_if_needed)
+        monitor_guard.start()
+        app._printx_monitor_guard = monitor_guard  # type: ignore[attr-defined]
     if (not start_hidden) or (not getattr(window, "background_supported", False)):
         window.show()
     exit_code = app.exec()
+    bridge.stop()
     if monitor:
         monitor.stop()
     raise SystemExit(exit_code)
@@ -403,6 +426,15 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     mode = args.mode or config.get("mode", "single")
+    logging.info("PrintX starting: mode=%s background=%s install_root=%s", mode, args.background, install_root())
+    if args.background:
+        logging.info("Auto-start/background mode requested. UI will stay hidden while monitoring runs.")
+
+    if mode in {"single", "server"} and not args.headless:
+        control_message = "PING_ONLY" if args.background else "SHOW_UI"
+        if send_control_message(control_message):
+            logging.info("A PrintX instance is already running. Control message sent: %s", control_message)
+            return
 
     if mode in {"single", "server"}:
         try:

@@ -80,6 +80,9 @@ class APIClient:
     def delete_print_job(self, job_id: int) -> dict:
         return self._delete(f"/api/print-jobs/{int(job_id)}")
 
+    def update_print_job_type(self, job_id: int, print_type: str) -> dict:
+        return self._put(f"/api/print-jobs/{int(job_id)}/type", {"print_type": print_type})
+
     def get_settings(self) -> dict:
         return self._get("/api/settings")
 
@@ -108,6 +111,12 @@ class APIClient:
 
     def list_services(self) -> List[Dict]:
         return self._get("/api/services/catalog")["items"]
+
+    def list_service_records(self, day: Optional[str] = None, limit: int = 200) -> List[Dict]:
+        params = {"limit": limit}
+        if day:
+            params["date"] = day
+        return self._get("/api/services/records", params=params)["items"]
 
     def add_service(self, service_name: str, default_price: float) -> dict:
         return self._post("/api/services/catalog", {"service_name": service_name, "default_price": default_price})

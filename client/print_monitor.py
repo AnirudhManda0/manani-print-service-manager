@@ -218,6 +218,7 @@ class PrintMonitor:
                 pending_key = self._pending_job_key(printer_name=printer_name, job_id=job_id)
                 current_pending_keys.add(pending_key)
                 state = self._merge_pending_state(pending_key=pending_key, now=now, job=job, printer_name=printer_name)
+                self._ensure_pending_metadata(state=state, printer_handle=handle, printer_name=printer_name)
                 total_pages, pages_printed = self._extract_page_counts(job)
                 logger.debug(
                     "Queue snapshot: printer=%s job_id=%s total_pages=%s pages_printed=%s status=%s",
@@ -528,26 +529,96 @@ class PrintMonitor:
                 continue
         return text
 
-    def _detect_print_type(self, job_info: Dict[str, object], printer_info: Dict[str, object]) -> str:
-        """Infer color mode from job or printer DEVMODE."""
-
-        def _color_from_devmode(dev_mode) -> Optional[str]:
-            if dev_mode is None or win32con is None:
-                return None
-            color_value = getattr(dev_mode, "Color", None)
-            if color_value == getattr(win32con, "DMCOLOR_COLOR", 2):
-                return "color"
-            if color_value == getattr(win32con, "DMCOLOR_MONOCHROME", 1):
-                return "black_and_white"
+    @staticmethod
+    def _color_from_value(color_value: object) -> Optional[str]:
+        if win32con is None:
             return None
+        try:
+            safe_value = int(color_value)
+        except (TypeError, ValueError):
+            return None
+        if safe_value == getattr(win32con, "DMCOLOR_COLOR", 2):
+            return "color"
+        if safe_value == getattr(win32con, "DMCOLOR_MONOCHROME", 1):
+            return "black_and_white"
+        return None
 
-        detected = _color_from_devmode(job_info.get("pDevMode"))
+    def _color_from_devmode(self, dev_mode, require_explicit_field: bool = False) -> Optional[str]:
+        if dev_mode is None:
+            return None
+        if require_explicit_field and win32con is not None:
+            fields = getattr(dev_mode, "dmFields", None)
+            if fields is None:
+                fields = getattr(dev_mode, "Fields", None)
+            try:
+                safe_fields = int(fields or 0)
+            except (TypeError, ValueError):
+                safe_fields = 0
+            if not (safe_fields & getattr(win32con, "DM_COLOR", 2048)):
+                return None
+        return self._color_from_value(getattr(dev_mode, "dmColor", None) or getattr(dev_mode, "Color", None))
+
+    @staticmethod
+    def _printer_supports_color(printer_name: str, printer_info: Dict[str, object]) -> Optional[bool]:
+        if win32print is None or win32con is None:
+            return None
+        port_name = str(printer_info.get("pPortName") or "").strip()
+        if not printer_name or not port_name:
+            return None
+        capability_code = getattr(win32con, "DC_COLORDEVICE", 32)
+        for args in (
+            (printer_name, port_name, capability_code),
+            (printer_name, port_name, capability_code, None),
+        ):
+            try:
+                result = win32print.DeviceCapabilities(*args)
+                return bool(result)
+            except Exception:
+                continue
+        return None
+
+    def _detect_print_type(
+        self,
+        job_info: Dict[str, object],
+        printer_info: Dict[str, object],
+        printer_name: str,
+    ) -> tuple[str, str, bool]:
+        """Infer color mode from job DEVMODE, job properties, and printer capabilities."""
+
+        detected = self._color_from_devmode(job_info.get("pDevMode"), require_explicit_field=True)
         if detected:
-            return detected
-        detected = _color_from_devmode(printer_info.get("pDevMode"))
+            return detected, "job_devmode", False
+
+        job_color_value = job_info.get("Color")
+        if job_color_value is None:
+            job_color_value = job_info.get("dmColor")
+        detected = self._color_from_value(job_color_value)
         if detected:
-            return detected
-        return "black_and_white"
+            if detected == "black_and_white":
+                return detected, "job_properties_bw", False
+            logger.debug(
+                "Ignoring ambiguous job color property for printer=%s because driver did not expose an explicit job DEVMODE color field.",
+                printer_name,
+            )
+
+        detected = self._color_from_devmode(printer_info.get("pDevMode"), require_explicit_field=True)
+        if detected:
+            if detected == "black_and_white":
+                return detected, "printer_devmode", False
+            logger.debug(
+                "Ignoring printer default color mode for classification: printer=%s",
+                printer_name,
+            )
+
+        printer_supports_color = self._printer_supports_color(
+            printer_name=printer_name,
+            printer_info=printer_info,
+        )
+        if printer_supports_color is False:
+            return "black_and_white", "printer_capability", False
+        if printer_supports_color is True:
+            return "black_and_white", "default_warning", True
+        return "black_and_white", "default_unknown", False
 
     @staticmethod
     def _paper_size_label(paper_size_value: Optional[int]) -> str:
@@ -560,21 +631,72 @@ class PrintMonitor:
         }
         return mapping.get(int(paper_size_value), "Unknown")
 
-    def _read_extended_metadata(self, printer_handle, job_id: int, printer_name: str) -> Dict[str, str]:
+    def _read_extended_metadata(self, printer_handle, job_id: int, printer_name: str) -> Dict[str, object]:
         """Best-effort metadata lookup. Fallbacks are safe defaults."""
         print_type = "black_and_white"
         paper_size = "Unknown"
+        print_type_source = "default_unknown"
+        default_warning = False
         try:
             printer_info = win32print.GetPrinter(printer_handle, 2)
             job_info = win32print.GetJob(printer_handle, int(job_id), 2)
-            print_type = self._detect_print_type(job_info=job_info, printer_info=printer_info)
+            print_type, print_type_source, default_warning = self._detect_print_type(
+                job_info=job_info,
+                printer_info=printer_info,
+                printer_name=printer_name,
+            )
             job_dev_mode = job_info.get("pDevMode")
             printer_dev_mode = printer_info.get("pDevMode")
-            paper_value = getattr(job_dev_mode, "PaperSize", None) or getattr(printer_dev_mode, "PaperSize", None)
+            logger.info(
+                "Print type analysis: printer=%s job_id=%s result=%s source=%s job_color=%s job_dmColor=%s job_dmFields=%s printer_dmColor=%s printer_dmFields=%s",
+                printer_name,
+                job_id,
+                print_type,
+                print_type_source,
+                job_info.get("Color"),
+                getattr(job_dev_mode, "dmColor", None) if job_dev_mode is not None else None,
+                getattr(job_dev_mode, "dmFields", None) if job_dev_mode is not None else None,
+                getattr(printer_dev_mode, "dmColor", None) if printer_dev_mode is not None else None,
+                getattr(printer_dev_mode, "dmFields", None) if printer_dev_mode is not None else None,
+            )
+            paper_value = (
+                getattr(job_dev_mode, "dmPaperSize", None)
+                or getattr(job_dev_mode, "PaperSize", None)
+                or getattr(printer_dev_mode, "dmPaperSize", None)
+                or getattr(printer_dev_mode, "PaperSize", None)
+            )
             paper_size = self._paper_size_label(paper_value)
         except Exception:
             logger.debug("Could not read extended metadata for printer=%s job_id=%s", printer_name, job_id)
-        return {"print_type": print_type, "paper_size": paper_size}
+        return {
+            "print_type": print_type,
+            "paper_size": paper_size,
+            "print_type_source": print_type_source,
+            "default_warning": default_warning,
+        }
+
+    def _ensure_pending_metadata(self, state: Dict[str, object], printer_handle, printer_name: str) -> None:
+        job_id = self._safe_int(state.get("job_id"), default=0)
+        if printer_handle is None or job_id <= 0:
+            return
+        needs_refresh = (
+            not state.get("print_type")
+            or str(state.get("paper_size") or "Unknown") == "Unknown"
+            or str(state.get("print_type_source") or "").startswith("default")
+        )
+        if not needs_refresh:
+            return
+        metadata = self._read_extended_metadata(printer_handle=printer_handle, job_id=job_id, printer_name=printer_name)
+        state["print_type"] = metadata.get("print_type", state.get("print_type", "black_and_white"))
+        state["paper_size"] = metadata.get("paper_size", state.get("paper_size", "Unknown"))
+        state["print_type_source"] = metadata.get("print_type_source", state.get("print_type_source", "default_unknown"))
+        if metadata.get("default_warning") and not state.get("print_type_warning_logged"):
+            logger.warning(
+                "Color mode could not be read reliably for printer=%s job_id=%s. Defaulting billing to black and white.",
+                printer_name,
+                job_id,
+            )
+            state["print_type_warning_logged"] = True
 
     def _build_payload_from_state(self, state: Dict[str, object], pages: int, printer_handle=None) -> Dict[str, object]:
         printer_name = str(state.get("printer_name", "") or "")
@@ -582,9 +704,20 @@ class PrintMonitor:
         document_name = str(state.get("document_name", "") or "")
         submission_time = str(state.get("submission_time", "") or "") or None
         user_name = str(state.get("user_name", "") or "").strip() or None
-        metadata = {"print_type": "black_and_white", "paper_size": "Unknown"}
-        if printer_handle is not None and job_id > 0:
-            metadata = self._read_extended_metadata(printer_handle=printer_handle, job_id=job_id, printer_name=printer_name)
+        metadata = {
+            "print_type": str(state.get("print_type") or "black_and_white"),
+            "paper_size": str(state.get("paper_size") or "Unknown"),
+        }
+        if printer_handle is not None and job_id > 0 and (
+            metadata["paper_size"] == "Unknown" or not metadata["print_type"]
+        ):
+            fresh_metadata = self._read_extended_metadata(
+                printer_handle=printer_handle,
+                job_id=job_id,
+                printer_name=printer_name,
+            )
+            metadata["print_type"] = str(fresh_metadata.get("print_type") or metadata["print_type"] or "black_and_white")
+            metadata["paper_size"] = str(fresh_metadata.get("paper_size") or metadata["paper_size"] or "Unknown")
         event_time = submission_time or datetime.now().isoformat(timespec="seconds")
         return {
             "computer_name": self.computer_name,
@@ -598,8 +731,8 @@ class PrintMonitor:
                 document_name=document_name,
             ),
             "pages": max(1, self._safe_int(pages, default=1)),
-            "print_type": metadata["print_type"],
-            "paper_size": metadata["paper_size"],
+            "print_type": metadata["print_type"] or "black_and_white",
+            "paper_size": metadata["paper_size"] or "Unknown",
             "timestamp": event_time,
             "submission_time": submission_time,
             "user_name": user_name,
@@ -689,6 +822,9 @@ def run_background_client(
     monitor.start()
     try:
         while True:
+            if not monitor.is_running:
+                logger.warning("Background print monitor stopped unexpectedly. Restarting.")
+                monitor.start()
             time.sleep(2)
     except KeyboardInterrupt:
         monitor.stop()

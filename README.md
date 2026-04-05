@@ -10,7 +10,7 @@ It combines:
 - service logging and revenue tracking
 - FastAPI + SQLite local server mode
 - background monitoring with system tray behavior
-- Windows auto-start support
+- Windows auto-start support by registry and Startup-folder shortcut
 
 ## Release Targets
 
@@ -25,10 +25,11 @@ Important:
 
 - Detects all installed printers through `win32print.EnumPrinters`
 - Polls each queue through `win32print.EnumJobs`
+- Classifies `color` vs `black_and_white` from spooler DEVMODE and printer capability fallbacks
 - Avoids duplicate print entries with spooler job tracking and server-side idempotency
 - Calculates print cost separately for B&W and color
 - Records services with confirmation prompts
-- Shows dashboard totals and revenue trend charts
+- Keeps the dashboard focused on KPI cards and moves charts into Reports
 - Backs up the SQLite database daily
 - Recreates missing settings safely and quarantines corrupted config/database files when possible
 
@@ -88,5 +89,6 @@ powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1 -Target wi
 ## Notes
 
 - Closing the main window sends PrintX to the system tray instead of stopping monitoring.
-- Auto-start writes a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry on Windows.
+- Auto-start writes both a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry and a Startup-folder shortcut on Windows.
+- Packaged runtime logs are written to `logs/printx.log`.
 - If `assets/logo.png` or `assets/app_icon.ico` is missing, the app still runs with fallback UI icons.
