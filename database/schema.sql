@@ -1,4 +1,4 @@
--- Core schema for ManAni Print & Service Manager
+-- Core schema for PrintX
 
 CREATE TABLE IF NOT EXISTS print_jobs (
     id INTEGER PRIMARY KEY,

@@ -53,6 +53,9 @@ class SettingsPanel(QWidget):
         disable_wheel_changes(self.discovery_port)
         self.computer_name = QLineEdit()
         self.operator_id = QLineEdit()
+        self.autostart_enabled = QComboBox()
+        self.autostart_enabled.addItem("Enabled", True)
+        self.autostart_enabled.addItem("Disabled", False)
         self.poll_interval = QDoubleSpinBox()
         self.poll_interval.setRange(0.1, 10.0)
         self.poll_interval.setDecimals(2)
@@ -98,6 +101,7 @@ class SettingsPanel(QWidget):
         form.addRow("Discovery Port", self.discovery_port)
         form.addRow("Computer Name", self.computer_name)
         form.addRow("Operator ID", self.operator_id)
+        form.addRow("Auto Start With Windows", self.autostart_enabled)
         form.addRow("Polling Interval (sec)", self.poll_interval)
         form.addRow("B&W Price Per Page", self.bw_price)
         form.addRow("Color Price Per Page", self.color_price)
@@ -141,6 +145,15 @@ class SettingsPanel(QWidget):
             self.discovery_port.setValue(int(system_data.get("discovery_port", 8788)))
             self.computer_name.setText(str(system_data.get("computer_name", "")))
             self.operator_id.setText(str(system_data.get("operator_id", "ADMIN")))
+            autostart_flag = bool(system_data.get("autostart_enabled", False))
+            autostart_index = self.autostart_enabled.findData(autostart_flag)
+            self.autostart_enabled.setCurrentIndex(autostart_index if autostart_index >= 0 else 1)
+            if not bool(system_data.get("autostart_supported", True)):
+                self.autostart_enabled.setEnabled(False)
+                self.autostart_enabled.setToolTip("Autostart is only available on Windows.")
+            else:
+                self.autostart_enabled.setEnabled(True)
+                self.autostart_enabled.setToolTip("Starts PrintX in background when Windows starts.")
             self.poll_interval.setValue(float(system_data.get("poll_interval", 0.5)))
             self.bw_price.setValue(float(data.get("bw_price_per_page", 2.0)))
             self.color_price.setValue(float(data.get("color_price_per_page", 10.0)))
@@ -172,6 +185,7 @@ class SettingsPanel(QWidget):
                 discovery_port=int(self.discovery_port.value()),
                 computer_name=self.computer_name.text().strip(),
                 operator_id=self.operator_id.text().strip() or "ADMIN",
+                autostart_enabled=bool(self.autostart_enabled.currentData()),
                 poll_interval=float(self.poll_interval.value()),
                 bw_price_per_page=float(self.bw_price.value()),
                 color_price_per_page=float(self.color_price.value()),

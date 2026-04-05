@@ -12,6 +12,8 @@ import socket
 from typing import Any, Dict
 from urllib.parse import urlparse
 
+from branding import DEFAULT_DATABASE_NAME
+
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "mode": "single",
@@ -21,10 +23,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "discovery_port": 8788,
     "computer_name": "",
     "operator_id": "ADMIN",
+    "autostart_enabled": False,
     "poll_interval": 0.5,
     "bw_price_per_page": 2.0,
     "color_price_per_page": 10.0,
-    "database_path": "database/cybercafe.db",
+    "database_path": f"database/{DEFAULT_DATABASE_NAME}",
     "print_monitor_enabled": True,
 }
 
@@ -70,6 +73,8 @@ def normalize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
         cfg["computer_name"] = str(raw.get("computer_name")).strip() or cfg["computer_name"]
     if raw.get("operator_id"):
         cfg["operator_id"] = str(raw.get("operator_id")).strip() or cfg["operator_id"]
+    if raw.get("autostart_enabled") is not None:
+        cfg["autostart_enabled"] = bool(raw.get("autostart_enabled"))
     if raw.get("poll_interval") is not None:
         cfg["poll_interval"] = _safe_float(raw.get("poll_interval"), cfg["poll_interval"])
     if raw.get("bw_price_per_page") is not None:
@@ -139,6 +144,7 @@ def serialize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "discovery_port": normalized["discovery_port"],
         "computer_name": normalized["computer_name"],
         "operator_id": normalized["operator_id"],
+        "autostart_enabled": normalized["autostart_enabled"],
         "poll_interval": normalized["poll_interval"],
         "bw_price_per_page": normalized["bw_price_per_page"],
         "color_price_per_page": normalized["color_price_per_page"],
@@ -154,8 +160,21 @@ def load_config_file(config_path: str) -> Dict[str, Any]:
         save_config_file(config_path, data)
         return data
 
-    with open(config_path, "r", encoding="utf-8") as handle:
-        raw = json.load(handle)
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        broken_path = f"{config_path}.corrupt"
+        try:
+            if os.path.exists(config_path):
+                if os.path.exists(broken_path):
+                    os.remove(broken_path)
+                os.replace(config_path, broken_path)
+        except OSError:
+            pass
+        data = normalize_config({})
+        save_config_file(config_path, data)
+        return data
     return normalize_config(raw)
 
 

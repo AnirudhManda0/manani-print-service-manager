@@ -6,9 +6,10 @@
   "discovery_port": 8788,
   "computer_name": "ADMIN-PC",
   "operator_id": "ADMIN",
+  "autostart_enabled": false,
   "poll_interval": 0.5,
   "bw_price_per_page": 2.0,
   "color_price_per_page": 10.0,
-  "database_path": "database/cybercafe.db",
+  "database_path": "database/printx.db",
   "print_monitor_enabled": true
 }

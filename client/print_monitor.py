@@ -50,7 +50,7 @@ class PrintMonitor:
         self.on_job = on_job
         self.poll_interval = poll_interval
         self.computer_name = computer_name or socket.gethostname()
-        self.operator_id = (operator_id or os.environ.get("MANANI_OPERATOR_ID") or "ADMIN").strip() or "ADMIN"
+        self.operator_id = (operator_id or os.environ.get("PRINTX_OPERATOR_ID") or "ADMIN").strip() or "ADMIN"
         self.auto_discovery_enabled = bool(auto_discovery_enabled)
         self.discovery_port = int(discovery_port)
         self.max_processed_jobs = max(1000, int(max_processed_jobs))
@@ -672,7 +672,7 @@ def run_background_client(
     discovery_port: int = DEFAULT_DISCOVERY_PORT,
 ) -> None:
     """Run monitor loop for standalone client deployment."""
-    level_name = os.environ.get("MANANI_LOG_LEVEL", "INFO").upper()
+    level_name = os.environ.get("PRINTX_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     logging.basicConfig(
         level=level,
@@ -695,5 +695,5 @@ def run_background_client(
 
 
 if __name__ == "__main__":
-    server = os.environ.get("MANANI_SERVER_URL") or os.environ.get("CYBERCAFE_SERVER_URL", "http://127.0.0.1:8787")
+    server = os.environ.get("PRINTX_SERVER_URL", "http://127.0.0.1:8787")
     run_background_client(server, poll_interval=0.5)

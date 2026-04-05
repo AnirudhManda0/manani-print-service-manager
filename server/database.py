@@ -19,6 +19,8 @@ from typing import Dict, List, Optional, Tuple
 
 import logging
 
+from branding import DEFAULT_ARCHIVE_DATABASE_NAME, DEFAULT_BACKUP_PREFIX
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +39,30 @@ class Database:
         parent_dir = os.path.dirname(self.db_path)
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
+        self._conn = None
+        try:
+            self._open_connection()
+        except sqlite3.DatabaseError as exc:
+            corrupt_path = self._quarantine_corrupt_database()
+            logger.exception("Database error detected. Existing DB moved to %s and a fresh DB was created.", corrupt_path)
+            self._open_connection()
+
+    def _open_connection(self) -> None:
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._configure()
         self.initialize()
+
+    def _quarantine_corrupt_database(self) -> str:
+        corrupt_path = f"{self.db_path}.corrupt-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        try:
+            if self._conn is not None:
+                self._conn.close()
+        except Exception:
+            pass
+        if os.path.exists(self.db_path):
+            os.replace(self.db_path, corrupt_path)
+        return corrupt_path
 
     @staticmethod
     def _to_decimal(value: object, fallback: str = "0") -> Decimal:
@@ -186,7 +208,8 @@ class Database:
 
     def close(self) -> None:
         with self._lock:
-            self._conn.close()
+            if self._conn is not None:
+                self._conn.close()
 
     def get_settings(self) -> Dict[str, object]:
         """Return normalized settings used by pricing, retention, and backup logic."""
@@ -654,7 +677,37 @@ class Database:
             **revenue,
             "total_revenue": self._money_float(total),
             "currency": settings["currency"],
+            "trend_points": self._daily_trend_points(anchor_day=day, days=7),
+            "contribution": {
+                "printing_revenue": revenue["printing_revenue"],
+                "service_revenue": revenue["service_revenue"],
+            },
         }
+
+    def _daily_trend_points(self, anchor_day: Optional[str], days: int = 7) -> List[Dict[str, object]]:
+        if anchor_day:
+            base_day = datetime.strptime(anchor_day, "%Y-%m-%d").date()
+        else:
+            base_day = date.today()
+        points: List[Dict[str, object]] = []
+        for offset in range(max(1, int(days)) - 1, -1, -1):
+            current_day = base_day - timedelta(days=offset)
+            start_ts = f"{current_day.isoformat()} 00:00:00"
+            end_ts = f"{(current_day + timedelta(days=1)).isoformat()} 00:00:00"
+            revenue = self._revenue_between(start_ts, end_ts)
+            total = self._money(
+                Decimal(str(revenue["printing_revenue"])) + Decimal(str(revenue["service_revenue"]))
+            )
+            points.append(
+                {
+                    "date": current_day.isoformat(),
+                    "label": current_day.strftime("%d %b"),
+                    "total_revenue": self._money_float(total),
+                    "printing_revenue": revenue["printing_revenue"],
+                    "service_revenue": revenue["service_revenue"],
+                }
+            )
+        return points
 
     def get_report(self, period: str, day: Optional[str] = None) -> Dict[str, object]:
         """Period report endpoint backing Reports tab."""
@@ -752,7 +805,7 @@ class Database:
         """Move old data to archive database while preserving reporting continuity."""
         safe_days = max(1, int(days))
         cutoff = (datetime.now() - timedelta(days=safe_days)).strftime("%Y-%m-%d %H:%M:%S")
-        archive_path = archive_db_path or os.path.join(os.path.dirname(self.db_path), "cybercafe_archive.db")
+        archive_path = archive_db_path or os.path.join(os.path.dirname(self.db_path), DEFAULT_ARCHIVE_DATABASE_NAME)
         os.makedirs(os.path.dirname(archive_path), exist_ok=True)
 
         with self._lock:
@@ -897,7 +950,7 @@ class Database:
 
             backup_folder = self._resolve_backup_folder(str(settings.get("backup_folder", "backup")))
             os.makedirs(backup_folder, exist_ok=True)
-            backup_path = os.path.join(backup_folder, f"cybercafe_{today.replace('-', '_')}.db")
+            backup_path = os.path.join(backup_folder, f"{DEFAULT_BACKUP_PREFIX}_{today.replace('-', '_')}.db")
 
             backup_conn = sqlite3.connect(backup_path)
             try:

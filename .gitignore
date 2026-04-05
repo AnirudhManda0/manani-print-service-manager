@@ -9,6 +9,7 @@ __pycache__/
 # Build artifacts
 build/
 dist/
+.build_tools/
 *.spec.bak
 
 # Local databases
@@ -30,9 +31,11 @@ backup/
 Thumbs.db
 .vscode/
 .idea/
+docs/~$*.docx
 
 # Packaged binaries and temporary portability checks
 *.exe
+releases/*/*.zip
 portable_*/
 
 # Test/runtime temp folders

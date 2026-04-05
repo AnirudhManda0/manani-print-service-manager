@@ -1,314 +1,92 @@
-# ManAni Print & Service Manager
+![PrintX logo](assets/logo.png)
 
-ManAni Print & Service Manager is a Windows desktop application for cyber cafes and print shops.
-It combines print-job capture, service billing, reporting, and backup into one offline-capable workflow.
+# PrintX
 
-## Required Software and Dependencies
+PrintX is a production-focused cyber cafe print and service management system for Windows desktops.
+It combines:
 
-Install the following on a development machine:
+- real-time Windows spooler monitoring
+- accurate print billing for B&W and color jobs
+- service logging and revenue tracking
+- FastAPI + SQLite local server mode
+- background monitoring with system tray behavior
+- Windows auto-start support
 
-- Python 3.9 for Windows 7 production builds
-- Python 3.10+ is acceptable only for non-Windows-7 testing builds
-- Git
-- PyInstaller
-- Printer drivers for the printers used in the shop
+## Release Targets
 
-Required Python libraries (installed through `requirements.txt`):
+- `main`: Windows 10 and above, packaged as `PrintX.exe`
+- `windows7-legacy`: Windows 7 compatibility lane, packaged as `PrintX_Win7.exe`
 
-- PySide2
-- FastAPI
-- uvicorn
-- requests
-- pywin32
-- pydantic
+Important:
+- the Windows 10 release can be built from this repo on the current modern toolchain
+- the Windows 7 release must be built in a Python 3.8 legacy environment to avoid `api-ms-win-core-path-l1-1-0.dll` and related runtime issues
 
-Install command:
+## Key Features
 
-```bash
-pip install -r requirements.txt
-```
+- Detects all installed printers through `win32print.EnumPrinters`
+- Polls each queue through `win32print.EnumJobs`
+- Avoids duplicate print entries with spooler job tracking and server-side idempotency
+- Calculates print cost separately for B&W and color
+- Records services with confirmation prompts
+- Shows dashboard totals and revenue trend charts
+- Backs up the SQLite database daily
+- Recreates missing settings safely and quarantines corrupted config/database files when possible
 
-## Development Setup
+## Default Runtime Modes
 
-1. Clone repository:
+- `single`: UI + API + monitor on one PC
+- `server`: central server mode
+- `client`: background print monitor only
 
-```bash
-git clone https://github.com/AnirudhManda0/manani-print-service-manager.git
-cd manani-print-service-manager
-```
+## Quick Start
 
-2. Install dependencies:
+1. Install Python dependencies for the target release lane.
+2. Run `python database/init_db.py`
+3. Start the app with `python main.py`
+4. Open Settings and confirm:
+   - server IP / port
+   - printer pricing
+   - operator ID
+   - auto-start preference
 
-```bash
-pip install -r requirements.txt
-```
+## Build Commands
 
-3. Initialize database:
-
-```bash
-python database/init_db.py
-```
-
-4. Run application:
-
-```bash
-python main.py
-```
-
-## Project Architecture
-
-Data flow:
-
-`Windows Printer -> Print Spooler -> client/print_monitor.py -> server/api.py -> server/database.py -> SQLite -> UI`
-
-Main modules:
-
-- `main.py`: runtime bootstrap, logging, mode selection, UI/API launch
-- `client/print_monitor.py`: spooler polling and print metadata capture
-- `server/api.py`: FastAPI routes for UI and monitor clients
-- `server/database.py`: billing logic, reporting queries, retention, backups
-- `network_discovery.py`: LAN auto-discovery for client-to-server connection
-- `ui/*`: operator interface (dashboard, services, settings, reports)
-- `PROMPT.md`: project memory / handover notes for future debugging and upgrades
-
-## Runtime Modes
-
-Single computer mode:
-
-```bash
-python main.py --mode single
-```
-
-Central server mode:
-
-```bash
-python main.py --mode server
-python main.py --mode server --headless
-```
-
-Client monitor mode:
-
-```bash
-python main.py --mode client --server-url http://<SERVER_IP>:8787
-```
-
-or:
-
-```bash
-python client/run_client.py --server-url http://<SERVER_IP>:8787 --poll-interval 0.5
-```
-
-## Production Roles
-
-Admin Server (Windows 7/10):
-
-- Runs FastAPI + SQLite storage
-- Shows dashboard, reports, settings, and print log
-- Stores all transactions centrally
-- Can also monitor local print jobs
-
-Client Monitor (Windows 10):
-
-- Detects print jobs from local USB/TCP-IP printers
-- Sends print transactions to admin server via HTTP
-- Does not keep permanent transaction data
-
-## Configuration File
-
-Runtime settings are stored in `config/settings.json`.
-
-Example:
-
-```json
-{
-  "mode": "single",
-  "server_ip": "192.168.1.50",
-  "server_port": 8787,
-  "auto_discovery_enabled": true,
-  "discovery_port": 8788,
-  "computer_name": "CLIENT-PC-01",
-  "operator_id": "ADMIN",
-  "poll_interval": 0.5,
-  "bw_price_per_page": 2.0,
-  "color_price_per_page": 10.0,
-  "database_path": "database/cybercafe.db",
-  "print_monitor_enabled": true
-}
-```
-
-Settings can be edited from the UI Settings panel. Changes are saved back to `config/settings.json`.
-If `auto_discovery_enabled` is `true`, client machines will try to discover the admin server automatically on the LAN.
-
-## Build Instructions
-
-Generate portable EXE:
-
-```bash
-pyinstaller --onefile --name CyberCafeManager main.py
-```
-
-or use the project spec:
-
-```bash
-pyinstaller CyberCafeManager.spec
-```
-
-Generate dedicated server and client executables:
-
-```bash
-pyinstaller CyberCafeServer.spec
-pyinstaller CyberCafeClient.spec
-```
-
-Build output:
-
-- `dist/CyberCafeManager.exe`
-- `dist/CyberCafeServer.exe`
-- `dist/CyberCafeClient.exe`
-
-This EXE is packaged with Python runtime and dependencies, so it can run without a Python installation.
-
-Create ready-to-copy ZIP packages:
+Windows 10 build:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1
+python -m PyInstaller PrintX.spec
+powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1 -Target windows10
 ```
 
-If you are building on a newer Python only for local testing:
+Windows 7 legacy build:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1 -AllowUnsupportedPython
+python -m PyInstaller PrintX_Win7.spec
+powershell -ExecutionPolicy Bypass -File .\build_release_packages.ps1 -Target windows7
 ```
 
-Generated files:
+## Release Layout
 
-- `release/CyberCafeServer.zip`
-- `release/CyberCafeClient.zip`
+- `releases/windows10/PrintX.exe`
+- `releases/windows7/PrintX_Win7.exe`
 
-## Portable Distribution
+## Documentation
 
-Portable file to distribute:
+- [Project Structure](docs/PROJECT_STRUCTURE.md)
+- [Installation](docs/INSTALLATION.md)
+- [User Guide](docs/USER_GUIDE.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Testing](docs/TESTING.md)
 
-- `dist/CyberCafeManager.exe`
+## Environment Variables
 
-At first launch, the EXE auto-creates runtime folders next to itself:
+- `PRINTX_LOG_LEVEL`
+- `PRINTX_SERVER_URL`
+- `PRINTX_OPERATOR_ID`
 
-- `config/`
-- `database/`
-- `logs/`
-- `backup/`
+## Notes
 
-## How to Share the Software
-
-Share this file:
-
-- `dist/CyberCafeManager.exe`
-- or `dist/CyberCafeServer.exe` and `dist/CyberCafeClient.exe` for split deployment
-
-Recommended sharing methods:
-
-- USB drive
-- Google Drive
-- GitHub release
-- Email attachment
-
-Example portable folder structure:
-
-```text
-CyberCafeManager/
-  CyberCafeManager.exe
-```
-
-End users only need to double-click `CyberCafeManager.exe`.
-
-## Features
-
-- Automatic print capture using Windows spooler APIs
-- Operator ID tagging for print transactions
-- B&W and color billing with Decimal precision
-- Paper-size capture (`A4`, `A3`, `Letter`, `Unknown`)
-- Service catalog and one-click service recording
-- Daily/weekly/monthly reports
-- Data retention actions (retain/archive/delete)
-- Daily automatic SQLite backup
-- Light/Dark desktop UI theme
-- Idempotent multi-client print ingestion (simultaneous or retried submissions do not duplicate rows)
-- Automatic admin-server discovery for client PCs on the same LAN
-- In-memory retry queue so temporarily disconnected clients do not immediately lose captured jobs
-
-## Troubleshooting
-
-Printer not detected:
-
-- Verify printer driver installation.
-- Verify Print Spooler service is running.
-- Verify monitor mode is active and API is reachable.
-- Check `logs/application.log` for `Detected printers (...)` startup diagnostics.
-
-Spooler detection test (all printers):
-
-1. Open terminal in project root.
-2. Run:
-
-```bash
-python test_spooler_detection.py
-```
-
-3. Confirm your USB and network printers appear in the "Detected printers" list.
-4. Print a small test page (Notepad is enough) to each printer one by one.
-5. Check console output for:
-
-- `New print job detected`
-- `printer_name`
-- `document_name`
-- `total_pages`
-- `submission_time`
-- `user_name`
-- page count greater than zero before job is recorded
-
-Tip: Keep `MANANI_LOG_LEVEL=DEBUG` to see queue polling diagnostics (`Detected printer`, `Checking queue`, `Pages detected`, `Job recorded`).
-
-## End-to-End Test
-
-1. Start application (`python main.py` or executable).
-2. Print a test document (for example 18-page PDF).
-3. Verify Print Log shows correct `pages` value (not 0).
-4. Verify Dashboard updates `Total Prints Today`, `B&W Pages`/`Color Pages`, and `Total Revenue`.
-5. Verify Delete button removes selected print transaction.
-6. Open Services -> Add Service, enter expressions like `10 * 2`, and verify calculated value is saved as `20`.
-
-## Update-Safe Process
-
-1. Stop running application.
-2. Trigger/verify backup (Settings -> Run Backup Now), or copy `database/cybercafe.db`.
-3. Replace executable (`CyberCafeServer.exe` / `CyberCafeClient.exe`).
-4. Keep existing `database/` and `config/` folders unchanged.
-5. Start application again.
-
-Daily backup files are written to `backup/` (configurable in Settings).
-
-Port already in use:
-
-- Close existing running app instance or change port in `config/settings.json`.
-
-Database busy/locked:
-
-- Avoid editing DB externally while app is running.
-- Run one central admin server (`CyberCafeServer.exe`) and connect clients through API.
-- Multiple client PCs can submit at the same time; server-side `source_job_key` idempotency prevents duplicate inserts.
-
-Windows 7 executable issue:
-
-- A build created with Python 3.13 / PySide6 is not a valid Windows 7 production build.
-- Build the final EXEs with Python 3.9 so the packaged application can run on Windows 7.
-
-Enable debug logs:
-
-```powershell
-$env:MANANI_LOG_LEVEL = "DEBUG"
-python main.py
-```
-
-## License
-
-MIT License (`LICENSE`).
+- Closing the main window sends PrintX to the system tray instead of stopping monitoring.
+- Auto-start writes a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry on Windows.
+- If `assets/logo.png` or `assets/app_icon.ico` is missing, the app still runs with fallback UI icons.

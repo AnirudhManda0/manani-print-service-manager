@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 import requests
 import uvicorn
 
+from branding import APP_FULL_NAME, DEFAULT_DATABASE_NAME
 from client.print_monitor import PrintMonitor, run_background_client
 from network_discovery import DEFAULT_DISCOVERY_PORT, ServerDiscoveryResponder
 from runtime_config import load_config_file, normalize_config, save_config_file
@@ -35,7 +36,7 @@ def configure_logging() -> None:
     logs_dir = os.path.join(install_root(), "logs")
     os.makedirs(logs_dir, exist_ok=True)
     log_file = os.path.join(logs_dir, "application.log")
-    level_name = os.environ.get("MANANI_LOG_LEVEL", "INFO").upper()
+    level_name = os.environ.get("PRINTX_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
 
     root_logger = logging.getLogger()
@@ -193,7 +194,12 @@ def ensure_server_not_already_running(host: str, port: int) -> None:
             raise RuntimeError("Application already running.")
 
 
-def run_with_ui(api_url: str, app_version: str, monitor: Optional[PrintMonitor] = None) -> None:
+def run_with_ui(
+    api_url: str,
+    app_version: str,
+    monitor: Optional[PrintMonitor] = None,
+    start_hidden: bool = False,
+) -> None:
     """Start Qt event loop and connect UI to API."""
     from ui.qt import QApplication
 
@@ -202,8 +208,9 @@ def run_with_ui(api_url: str, app_version: str, monitor: Optional[PrintMonitor] 
 
     app = QApplication(sys.argv)
     client = APIClient(api_url)
-    window = MainWindow(client, app_version=app_version)
-    window.show()
+    window = MainWindow(client, app_version=app_version, start_hidden=start_hidden)
+    if (not start_hidden) or (not getattr(window, "background_supported", False)):
+        window.show()
     exit_code = app.exec()
     if monitor:
         monitor.stop()
@@ -213,7 +220,7 @@ def run_with_ui(api_url: str, app_version: str, monitor: Optional[PrintMonitor] 
 def _runtime_paths(config: Dict[str, Any]) -> Dict[str, str]:
     """Build concrete DB/schema paths for the current runtime environment."""
     return {
-        "db_path": resolve_runtime_path(str(config.get("database_path", "database/cybercafe.db"))),
+        "db_path": resolve_runtime_path(str(config.get("database_path", f"database/{DEFAULT_DATABASE_NAME}"))),
         "schema_path": resource_path("database/schema.sql"),
         "config_path": resolve_runtime_path("config/settings.json"),
     }
@@ -242,7 +249,7 @@ def _discovery_api_url(host: str, port: int) -> str:
     return f"http://{host}:{port}"
 
 
-def run_single_mode(config: Dict[str, Any]) -> None:
+def run_single_mode(config: Dict[str, Any], start_hidden: bool = False) -> None:
     """Single-PC mode: API + monitor + UI all on one machine."""
     paths = _runtime_paths(config)
     host = str(config.get("server_ip", "127.0.0.1"))
@@ -284,7 +291,7 @@ def run_single_mode(config: Dict[str, Any]) -> None:
         monitor.start()
 
     try:
-        run_with_ui(api_url, app_version=app_version, monitor=monitor)
+        run_with_ui(api_url, app_version=app_version, monitor=monitor, start_hidden=start_hidden)
     finally:
         if monitor:
             monitor.stop()
@@ -292,7 +299,7 @@ def run_single_mode(config: Dict[str, Any]) -> None:
         server.stop()
 
 
-def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
+def run_server_mode(config: Dict[str, Any], with_ui: bool = True, start_hidden: bool = False) -> None:
     """Central server mode with optional UI."""
     paths = _runtime_paths(config)
     host = str(config.get("server_ip", "127.0.0.1"))
@@ -335,7 +342,7 @@ def run_server_mode(config: Dict[str, Any], with_ui: bool = True) -> None:
             monitor.start()
 
         try:
-            run_with_ui(api_url=api_url, app_version=app_version, monitor=monitor)
+            run_with_ui(api_url=api_url, app_version=app_version, monitor=monitor, start_hidden=start_hidden)
         finally:
             if monitor:
                 monitor.stop()
@@ -381,11 +388,12 @@ def run_client_mode(config: Dict[str, Any], server_url: Optional[str] = None) ->
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="ManAni Print & Service Manager")
+    parser = argparse.ArgumentParser(description=APP_FULL_NAME)
     parser.add_argument("--mode", choices=["single", "server", "client"], default=None)
     parser.add_argument("--config", default=None, help="Path to settings.json")
     parser.add_argument("--headless", action="store_true", help="Server mode only: start API without desktop UI")
     parser.add_argument("--server-url", default=None, help="Client mode only: central server URL")
+    parser.add_argument("--background", action="store_true", help="Start hidden and keep monitoring in the system tray")
     return parser.parse_args()
 
 
@@ -408,9 +416,9 @@ def main() -> None:
             return
 
     if mode == "single":
-        run_single_mode(config)
+        run_single_mode(config, start_hidden=args.background)
     elif mode == "server":
-        run_server_mode(config, with_ui=not args.headless)
+        run_server_mode(config, with_ui=not args.headless, start_hidden=args.background)
     elif mode == "client":
         run_client_mode(config, server_url=args.server_url)
     else:

@@ -1,4 +1,4 @@
-"""Main desktop shell for ManAni Print & Service Manager.
+"""Main desktop shell for PrintX.
 
 This window orchestrates:
 - Dashboard metrics from API
@@ -12,9 +12,11 @@ UI widgets never write directly to SQLite; all data flows through API client cal
 import os
 from datetime import datetime
 
+from branding import APP_FULL_NAME, APP_NAME, icon_path, logo_path
 from ui.qt import (
     QComboBox,
     Qt,
+    QAction,
     QDateEdit,
     QDate,
     QHBoxLayout,
@@ -24,8 +26,11 @@ from ui.qt import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QMenu,
+    QPixmap,
     QScrollArea,
     QSize,
+    QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -52,14 +57,22 @@ class MainWindow(QMainWindow):
     - Sends user actions (settings/services/retention/backup) back to API
     """
 
-    def __init__(self, api_client, app_version: str = "1.0.0"):
+    def __init__(self, api_client, app_version: str = "1.0.0", start_hidden: bool = False):
         super().__init__()
         self.api = api_client
         self.app_version = app_version
+        self.start_hidden = start_hidden
+        self._tray_icon = None
+        self._tray_hint_shown = False
+        self._is_exiting = False
+        self.background_supported = False
         self.theme_manager = ThemeManager()
-        self.setWindowTitle(f"ManAni Print & Service Manager v{self.app_version}")
+        self.setWindowTitle(f"{APP_FULL_NAME} v{self.app_version}")
         self.resize(1280, 820)
         self.setMinimumSize(1100, 700)
+        app_icon_path = icon_path()
+        if os.path.exists(app_icon_path):
+            self.setWindowIcon(QIcon(app_icon_path))
 
         container = QWidget()
         self.setCentralWidget(container)
@@ -70,7 +83,12 @@ class MainWindow(QMainWindow):
         # Top ribbon: app title, dashboard date selector, theme toggle, and live clock.
         header = QHBoxLayout()
         header.setSpacing(10)
-        title = QLabel("ManAni Print & Service Manager")
+        logo_label = QLabel()
+        logo = QPixmap(logo_path())
+        if not logo.isNull():
+            logo_label.setPixmap(logo.scaled(42, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            header.addWidget(logo_label)
+        title = QLabel(APP_FULL_NAME)
         title.setObjectName("appTitle")
         subtitle = QLabel("POS Console")
         subtitle.setObjectName("secondaryLabel")
@@ -129,6 +147,7 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Ready")
         self.apply_theme()
+        self._setup_tray()
         self.refresh_all()
 
         self.refresh_timer = QTimer(self)
@@ -148,6 +167,8 @@ class MainWindow(QMainWindow):
         self.backup_timer.start()
         QTimer.singleShot(1200, self.run_daily_backup)
         QTimer.singleShot(1500, self.check_retention_notice)
+        if self.start_hidden:
+            QTimer.singleShot(250, lambda: self.hide_to_tray(notify=False))
 
     @staticmethod
     def _wrap_scroll(widget: QWidget) -> QScrollArea:
@@ -223,6 +244,58 @@ class MainWindow(QMainWindow):
         icon_path = ui_resource_path(os.path.join("ui", "icons", filename))
         return QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
 
+    def _setup_tray(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        self.background_supported = True
+        tray_icon = self.windowIcon()
+        if tray_icon.isNull():
+            tray_icon = self._icon("dashboard.svg")
+        self._tray_icon = QSystemTrayIcon(tray_icon, self)
+        self._tray_icon.setToolTip(APP_FULL_NAME)
+        tray_menu = QMenu(self)
+        open_action = tray_menu.addAction(f"Open {APP_NAME}")
+        hide_action = tray_menu.addAction("Hide Window")
+        tray_menu.addSeparator()
+        exit_action = tray_menu.addAction("Exit")
+        open_action.triggered.connect(self.show_from_tray)
+        hide_action.triggered.connect(self.hide_to_tray)
+        exit_action.triggered.connect(self.exit_application)
+        self._tray_icon.setContextMenu(tray_menu)
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
+
+    def _on_tray_activated(self, reason) -> None:
+        if reason in {QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick}:
+            if self.isVisible():
+                self.hide_to_tray(notify=False)
+            else:
+                self.show_from_tray()
+
+    def show_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def hide_to_tray(self, notify: bool = True) -> None:
+        if self._tray_icon is None:
+            return
+        self.hide()
+        if notify and not self._tray_hint_shown:
+            self._tray_hint_shown = True
+            self._tray_icon.showMessage(
+                APP_NAME,
+                "Print monitoring is still running in the background.",
+                QSystemTrayIcon.Information,
+                3000,
+            )
+
+    def exit_application(self) -> None:
+        self._is_exiting = True
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
+        self.close()
+
     def apply_theme(self) -> None:
         self.setStyleSheet(self.theme_manager.stylesheet())
         self.theme_toggle_btn.setText(self.theme_manager.mode_label())
@@ -231,6 +304,13 @@ class MainWindow(QMainWindow):
     def toggle_theme(self) -> None:
         self.theme_manager.toggle()
         self.apply_theme()
+
+    def closeEvent(self, event) -> None:  # pragma: no cover - UI close behavior.
+        if self._tray_icon is not None and not self._is_exiting:
+            event.ignore()
+            self.hide_to_tray(notify=True)
+            return
+        super().closeEvent(event)
 
     def _repolish_widget_tree(self, widget: QWidget) -> None:
         style = widget.style()

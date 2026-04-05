@@ -11,7 +11,7 @@ from runtime_config import load_config_file
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="ManAni print monitor client")
+    parser = argparse.ArgumentParser(description="PrintX print monitor client")
     parser.add_argument("--config", default=None, help="Path to settings.json")
     parser.add_argument("--server-url", default=None, help="Central server base URL")
     parser.add_argument("--poll-interval", type=float, default=None, help="Spooler polling interval in seconds")

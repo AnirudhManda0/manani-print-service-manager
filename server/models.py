@@ -49,6 +49,7 @@ class SystemConfigUpdate(BaseModel):
     discovery_port: int = Field(default=8788, ge=1, le=65535)
     computer_name: str = Field(default="", max_length=120)
     operator_id: str = Field(default="ADMIN", min_length=1, max_length=120)
+    autostart_enabled: bool = False
     poll_interval: float = Field(default=0.5, ge=0.1, le=10.0)
     bw_price_per_page: float = Field(..., ge=0)
     color_price_per_page: float = Field(..., ge=0)

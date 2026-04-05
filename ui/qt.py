@@ -2,7 +2,7 @@
 
 try:  # pragma: no cover - import resolution depends on target runtime.
     from PySide2.QtCore import QDate, QEvent, QObject, QSize, QTimer, Qt, Signal
-    from PySide2.QtGui import QIcon
+    from PySide2.QtGui import QAction, QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
     from PySide2.QtWidgets import (
         QAbstractScrollArea,
         QApplication,
@@ -18,11 +18,13 @@ try:  # pragma: no cover - import resolution depends on target runtime.
         QLabel,
         QLineEdit,
         QMainWindow,
+        QMenu,
         QMessageBox,
         QPushButton,
         QScrollArea,
         QSizePolicy,
         QSpinBox,
+        QSystemTrayIcon,
         QTableWidget,
         QTableWidgetItem,
         QTabWidget,
@@ -32,7 +34,7 @@ try:  # pragma: no cover - import resolution depends on target runtime.
     )
 except ImportError:  # pragma: no cover - fallback for older runtime stacks.
     from PySide6.QtCore import QDate, QEvent, QObject, QSize, QTimer, Qt, Signal
-    from PySide6.QtGui import QIcon
+    from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
     from PySide6.QtWidgets import (
         QAbstractScrollArea,
         QApplication,
@@ -48,11 +50,13 @@ except ImportError:  # pragma: no cover - fallback for older runtime stacks.
         QLabel,
         QLineEdit,
         QMainWindow,
+        QMenu,
         QMessageBox,
         QPushButton,
         QScrollArea,
         QSizePolicy,
         QSpinBox,
+        QSystemTrayIcon,
         QTableWidget,
         QTableWidgetItem,
         QTabWidget,

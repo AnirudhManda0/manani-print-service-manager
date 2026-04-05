@@ -1,4 +1,4 @@
-"""Server launcher entrypoint for PyInstaller server build."""
+"""Server launcher entrypoint for PrintX server mode."""
 
 import sys
 

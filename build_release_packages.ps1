@@ -1,4 +1,6 @@
 param(
+    [ValidateSet("windows10", "windows7")]
+    [string]$Target = "windows10",
     [switch]$SkipBuild,
     [switch]$AllowUnsupportedPython
 )
@@ -7,84 +9,84 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $distDir = Join-Path $projectRoot "dist"
-$releaseDir = Join-Path $projectRoot "release"
-$serverDir = Join-Path $releaseDir "CyberCafeServer"
-$clientDir = Join-Path $releaseDir "CyberCafeClient"
+$releasesDir = Join-Path $projectRoot "releases"
+$buildToolsDir = Join-Path $projectRoot ".build_tools"
 
-$serverExe = Join-Path $distDir "CyberCafeServer.exe"
-$clientExe = Join-Path $distDir "CyberCafeClient.exe"
+function Invoke-BuildStep {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SpecPath
+    )
+
+    if (Test-Path $buildToolsDir) {
+        if ($env:PYTHONPATH) {
+            $env:PYTHONPATH = "$buildToolsDir;$env:PYTHONPATH"
+        } else {
+            $env:PYTHONPATH = $buildToolsDir
+        }
+    }
+
+    python -m PyInstaller $SpecPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "PyInstaller build failed for $SpecPath"
+    }
+}
 
 $pythonVersion = (python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
-if ($pythonVersion -ne "3.9") {
-    $message = "Current Python is $pythonVersion. Windows 7 production builds must be created with Python 3.9."
-    if (-not $AllowUnsupportedPython) {
-        throw "$message Re-run with -AllowUnsupportedPython only for non-Windows-7 testing builds."
+if ($Target -eq "windows7") {
+    $message = "Windows 7 legacy builds must be created with Python 3.8 on a Windows 7 or compatible legacy build environment."
+    if ($pythonVersion -ne "3.8" -and -not $AllowUnsupportedPython) {
+        throw "$message Current Python is $pythonVersion."
     }
-    Write-Warning "$message Continuing because -AllowUnsupportedPython was provided."
+    if ($pythonVersion -ne "3.8") {
+        Write-Warning "$message Current Python is $pythonVersion, so this build is for packaging checks only."
+    }
 }
+
+$specName = "PrintX.spec"
+$outputExe = "PrintX.exe"
+$releaseSubdir = "windows10"
+if ($Target -eq "windows7") {
+    $specName = "PrintX_Win7.spec"
+    $outputExe = "PrintX_Win7.exe"
+    $releaseSubdir = "windows7"
+}
+
+$specPath = Join-Path $projectRoot $specName
+$exePath = Join-Path $distDir $outputExe
+$releaseDir = Join-Path $releasesDir $releaseSubdir
+$zipPath = Join-Path $releaseDir ([System.IO.Path]::GetFileNameWithoutExtension($outputExe) + ".zip")
 
 if (-not $SkipBuild) {
-    Write-Host "Building server executable..."
-    python -m PyInstaller (Join-Path $projectRoot "CyberCafeServer.spec")
-    Write-Host "Building client executable..."
-    python -m PyInstaller (Join-Path $projectRoot "CyberCafeClient.spec")
+    Write-Host "Building $outputExe from $specName..."
+    Invoke-BuildStep -SpecPath $specPath
 }
 
-if (-not (Test-Path $serverExe)) {
-    throw "Missing $serverExe. Run build first or remove -SkipBuild."
-}
-if (-not (Test-Path $clientExe)) {
-    throw "Missing $clientExe. Run build first or remove -SkipBuild."
+if (-not (Test-Path $exePath)) {
+    throw "Missing $exePath. Run build first or remove -SkipBuild."
 }
 
-if (Test-Path $releaseDir) {
-    Remove-Item -Recurse -Force $releaseDir
-}
+New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+Copy-Item $exePath (Join-Path $releaseDir $outputExe) -Force
+Copy-Item (Join-Path $projectRoot "assets\logo.png") (Join-Path $releaseDir "logo.png") -Force
+Copy-Item (Join-Path $projectRoot "config\settings.json") (Join-Path $releaseDir "settings.json") -Force
+Copy-Item (Join-Path $projectRoot "version.txt") (Join-Path $releaseDir "version.txt") -Force
 
-New-Item -ItemType Directory -Path $serverDir | Out-Null
-New-Item -ItemType Directory -Path $clientDir | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $serverDir "config") | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $serverDir "database") | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $clientDir "config") | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $clientDir "database") | Out-Null
+$releaseReadme = @"
+PrintX release package
 
-Copy-Item $serverExe (Join-Path $serverDir "CyberCafeServer.exe")
-Copy-Item $clientExe (Join-Path $clientDir "CyberCafeClient.exe")
-Copy-Item (Join-Path $projectRoot "config\settings.json") (Join-Path $serverDir "config\settings.json")
-Copy-Item (Join-Path $projectRoot "config\settings.json") (Join-Path $clientDir "config\settings.json")
-Copy-Item (Join-Path $projectRoot "database\schema.sql") (Join-Path $serverDir "database\schema.sql")
-Copy-Item (Join-Path $projectRoot "database\schema.sql") (Join-Path $clientDir "database\schema.sql")
-Copy-Item (Join-Path $projectRoot "version.txt") (Join-Path $serverDir "version.txt")
-Copy-Item (Join-Path $projectRoot "version.txt") (Join-Path $clientDir "version.txt")
+Target: $Target
+Executable: $outputExe
 
-$serverQuickstart = @"
-CyberCafeServer Package
-
-1. Edit config\settings.json
-2. Set mode=server and server_ip/server_port
-3. Keep auto_discovery_enabled=true for easier client connection
-4. Start CyberCafeServer.exe
+1. Edit settings.json if needed
+2. Keep the executable and settings.json together
+3. Start the executable
+4. Enable Auto Start from Settings if this is a production system
 "@
 
-$clientQuickstart = @"
-CyberCafeClient Package
+Set-Content -Path (Join-Path $releaseDir "README.txt") -Value $releaseReadme -Encoding ascii
+Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -Force
 
-1. Edit config\settings.json
-2. Set mode=client
-3. Keep auto_discovery_enabled=true or set central_server_url manually
-4. Set unique computer_name
-5. Start CyberCafeClient.exe
-"@
-
-Set-Content -Path (Join-Path $serverDir "QUICKSTART.txt") -Value $serverQuickstart -Encoding ascii
-Set-Content -Path (Join-Path $clientDir "QUICKSTART.txt") -Value $clientQuickstart -Encoding ascii
-
-$serverZip = Join-Path $releaseDir "CyberCafeServer.zip"
-$clientZip = Join-Path $releaseDir "CyberCafeClient.zip"
-
-Compress-Archive -Path (Join-Path $serverDir "*") -DestinationPath $serverZip -Force
-Compress-Archive -Path (Join-Path $clientDir "*") -DestinationPath $clientZip -Force
-
-Write-Host "Release packages created:"
-Write-Host " - $serverZip"
-Write-Host " - $clientZip"
+Write-Host "Release package ready:"
+Write-Host " - $releaseDir"
+Write-Host " - $zipPath"

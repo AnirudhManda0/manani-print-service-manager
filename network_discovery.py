@@ -11,13 +11,13 @@ import logging
 import socket
 import threading
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 logger = logging.getLogger(__name__)
 
-DISCOVERY_REQUEST = "MANANI_DISCOVER_SERVER_V1"
-DISCOVERY_RESPONSE = "MANANI_DISCOVER_SERVER_RESPONSE_V1"
+DISCOVERY_REQUEST = "PRINTX_DISCOVER_SERVER_V1"
+DISCOVERY_RESPONSE = "PRINTX_DISCOVER_SERVER_RESPONSE_V1"
 DEFAULT_DISCOVERY_PORT = 8788
 
 
@@ -84,7 +84,7 @@ class ServerDiscoveryResponder:
         self.app_version = app_version
         self.port = int(port)
         self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._thread = None  # type: Optional[threading.Thread]
 
     @property
     def is_running(self) -> bool:

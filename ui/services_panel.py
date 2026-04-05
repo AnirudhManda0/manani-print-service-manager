@@ -228,6 +228,19 @@ class ServicesPanel(QWidget):
 
     def record_service(self, service: dict) -> None:
         """Record one service action and notify parent dashboard to refresh totals."""
+        service_name = str(service.get("service_name", "this service"))
+        service_price = format_currency(self.currency, float(service.get("default_price", 0.0)))
+        response = QMessageBox.question(
+            self,
+            "Confirm Service",
+            f"Are you sure you want to apply '{service_name}'?\n\nDefault amount: {service_price}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if response != QMessageBox.Yes:
+            self.status_label.setText(f"Cancelled '{service_name}'")
+            return
+
         try:
             self.api.record_service(service_id=service["id"])
             self.status_label.setText(

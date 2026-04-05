@@ -1,4 +1,4 @@
-"""Client launcher entrypoint for PyInstaller client build."""
+"""Client launcher entrypoint for PrintX client mode."""
 
 import sys
 

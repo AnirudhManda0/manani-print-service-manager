@@ -69,7 +69,7 @@ def on_job(payload: dict) -> None:
 
 
 def main() -> None:
-    level_name = os.environ.get("MANANI_LOG_LEVEL", "DEBUG").upper()
+    level_name = os.environ.get("PRINTX_LOG_LEVEL", "DEBUG").upper()
     level = getattr(logging, level_name, logging.DEBUG)
     logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 

@@ -1,4 +1,4 @@
-"""FastAPI service layer for ManAni Print & Service Manager.
+"""FastAPI service layer for PrintX.
 
 The desktop UI talks only to this API client/server boundary.
 All persistence and business rules are delegated to server.database.Database.
@@ -13,6 +13,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 
+from autostart import get_status as get_autostart_status, set_enabled as set_autostart_enabled
+from branding import APP_API_TITLE, DEFAULT_DATABASE_NAME
 from runtime_config import load_config_file, save_config_file
 from server.database import Database
 from server.models import (
@@ -35,7 +37,7 @@ def create_app(
 ) -> FastAPI:
     """Create configured FastAPI app bound to one Database instance."""
     db = Database(db_path=db_path, schema_path=schema_path)
-    app = FastAPI(title="ManAni Print & Service Manager API", version=app_version)
+    app = FastAPI(title=APP_API_TITLE, version=app_version)
     backup_check_state = {"last_check": 0.0}
     cfg_path = config_path or os.path.join(os.path.dirname(os.path.dirname(db_path)), "config", "settings.json")
 
@@ -101,6 +103,7 @@ def create_app(
     @app.get("/api/system-config")
     def get_system_config() -> dict:
         cfg = load_config_file(cfg_path)
+        autostart = get_autostart_status()
         return {
             "server_ip": cfg.get("server_ip", "127.0.0.1"),
             "server_port": int(cfg.get("server_port", 8787)),
@@ -108,6 +111,8 @@ def create_app(
             "discovery_port": int(cfg.get("discovery_port", 8788)),
             "computer_name": cfg.get("computer_name", ""),
             "operator_id": cfg.get("operator_id", "ADMIN"),
+            "autostart_enabled": bool(cfg.get("autostart_enabled", autostart.get("enabled", False))),
+            "autostart_supported": bool(autostart.get("supported", False)),
             "poll_interval": float(cfg.get("poll_interval", 0.5)),
             "bw_price_per_page": float(cfg.get("bw_price_per_page", 2.0)),
             "color_price_per_page": float(cfg.get("color_price_per_page", 10.0)),
@@ -124,12 +129,14 @@ def create_app(
                 "discovery_port": int(payload.discovery_port),
                 "computer_name": payload.computer_name.strip() or cfg.get("computer_name", ""),
                 "operator_id": payload.operator_id.strip() or cfg.get("operator_id", "ADMIN"),
+                "autostart_enabled": bool(payload.autostart_enabled),
                 "poll_interval": float(payload.poll_interval),
                 "bw_price_per_page": float(payload.bw_price_per_page),
                 "color_price_per_page": float(payload.color_price_per_page),
             }
         )
         saved = save_config_file(cfg_path, cfg)
+        autostart_state = set_autostart_enabled(bool(saved.get("autostart_enabled", False)))
         return {
             "server_ip": saved.get("server_ip"),
             "server_port": int(saved.get("server_port", 8787)),
@@ -137,6 +144,8 @@ def create_app(
             "discovery_port": int(saved.get("discovery_port", 8788)),
             "computer_name": saved.get("computer_name"),
             "operator_id": saved.get("operator_id", "ADMIN"),
+            "autostart_enabled": autostart_state,
+            "autostart_supported": bool(get_autostart_status().get("supported", False)),
             "poll_interval": float(saved.get("poll_interval", 0.5)),
             "bw_price_per_page": float(saved.get("bw_price_per_page", 2.0)),
             "color_price_per_page": float(saved.get("color_price_per_page", 10.0)),
@@ -263,7 +272,7 @@ if __name__ == "__main__":
         with open(version_path, "r", encoding="utf-8") as handle:
             version = handle.read().strip() or version
     app = create_app(
-        db_path=os.path.join(root, "database", "cybercafe.db"),
+        db_path=os.path.join(root, "database", DEFAULT_DATABASE_NAME),
         schema_path=os.path.join(root, "database", "schema.sql"),
         config_path=os.path.join(root, "config", "settings.json"),
         app_version=version,
