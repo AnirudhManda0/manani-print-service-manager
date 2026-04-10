@@ -585,6 +585,21 @@ class Database:
             "default_price": self._money_float(safe_price),
         }
 
+    def delete_service_catalog(self, service_id: int) -> bool:
+        """Safely delete a service catalog item if it specifies no existing records."""
+        with self._lock:
+            # Check if there are existing records
+            row = self._conn.execute("SELECT COUNT(*) AS c FROM service_records WHERE service_id = ?;", (service_id,)).fetchone()
+            if row and row["c"] > 0:
+                raise ValueError("Cannot delete service because it has existing service records.")
+
+            cursor = self._conn.execute("DELETE FROM services_catalog WHERE id = ?;", (int(service_id),))
+            self._conn.commit()
+            deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info("Service catalog deleted: id=%s", service_id)
+        return deleted
+
     def list_services_catalog(self) -> List[Dict[str, object]]:
         with self._lock:
             rows = self._conn.execute(

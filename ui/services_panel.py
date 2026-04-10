@@ -10,6 +10,7 @@ import operator
 from datetime import datetime
 
 from ui.qt import (
+    QComboBox,
     QDialog,
     QFormLayout,
     QGridLayout,
@@ -131,6 +132,48 @@ class AddServiceDialog(QDialog):
         return self.name_input.text().strip(), float(self._calculated_value)
 
 
+class DeleteServiceDialog(QDialog):
+    """Small dialog to cleanly delete a service from the catalog."""
+
+    def __init__(self, parent=None, api=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Delete Service")
+        self.resize(320, 150)
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.combo = QComboBox()
+        self.combo.setMinimumHeight(38)
+        self.services = []
+        try:
+            if api:
+                self.services = api.list_services()
+                for s in self.services:
+                    self.combo.addItem(str(s.get("service_name", "")), s.get("id"))
+        except Exception:
+            pass
+
+        form.addRow("Select Service", self.combo)
+        layout.addLayout(form)
+
+        buttons = QHBoxLayout()
+        self.del_btn = QPushButton("Delete")
+        self.del_btn.setProperty("variant", "danger")
+        cancel_btn = QPushButton("Cancel")
+        self.del_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+
+        if not self.services:
+            self.del_btn.setEnabled(False)
+
+        buttons.addWidget(self.del_btn)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+
+    def get_service_id(self):
+        return self.combo.currentData()
+
+
 class ServicesPanel(QWidget):
     """Renders service buttons and records service activity through API."""
 
@@ -170,7 +213,7 @@ class ServicesPanel(QWidget):
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("border: none; background: transparent;")
+        self.scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         self.scroll_container = QWidget()
         self.grid = QGridLayout(self.scroll_container)
         self.grid.setContentsMargins(8, 8, 8, 8)

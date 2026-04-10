@@ -153,10 +153,18 @@ class ThemeManager:
         QPushButton#serviceActionButton {{
             min-height: 56px;
             max-height: 62px;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 700;
-            padding: 8px 12px;
+            padding: 8px 14px;
             text-align: left;
+            background: {t.card_background};
+            color: {t.primary_text};
+            border: 1px solid {t.border};
+            border-radius: 8px;
+        }}
+        QPushButton#serviceActionButton:hover {{
+            background: {t.hover};
+            border-color: {t.accent};
         }}
         QPushButton#tableDeleteButton {{
             min-height: 24px;
@@ -213,9 +221,9 @@ class ThemeManager:
         }}
 
         QTabWidget::pane {{
-            border: 1px solid {t.border};
+            border: none;
             border-radius: 8px;
-            margin-top: 18px;
+            margin-top: 0px;
         }}
         QTabBar::tab {{
             min-width: 120px;

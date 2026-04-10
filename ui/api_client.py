@@ -121,6 +121,9 @@ class APIClient:
     def add_service(self, service_name: str, default_price: float) -> dict:
         return self._post("/api/services/catalog", {"service_name": service_name, "default_price": default_price})
 
+    def delete_service(self, service_id: int) -> dict:
+        return self._delete(f"/api/services/catalog/{int(service_id)}")
+
     def record_service(self, service_id: int, price: Optional[float] = None) -> dict:
         payload = {"service_id": service_id}
         if price is not None:

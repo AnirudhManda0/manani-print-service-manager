@@ -544,8 +544,18 @@ class PrintMonitor:
         return None
 
     def _color_from_devmode(self, dev_mode, require_explicit_field: bool = False) -> Optional[str]:
+        """Read color mode from a DEVMODE struct.
+
+        When *require_explicit_field* is True the DM_COLOR bit in dmFields must
+        also be set.  A second lenient call (require_explicit_field=False) is
+        used as a fallback so that we never miss a color value that the driver
+        stored in dmColor without advertising the field bit.
+        """
         if dev_mode is None:
             return None
+        color_raw = getattr(dev_mode, "dmColor", None)
+        if color_raw is None:
+            color_raw = getattr(dev_mode, "Color", None)
         if require_explicit_field and win32con is not None:
             fields = getattr(dev_mode, "dmFields", None)
             if fields is None:
@@ -555,8 +565,10 @@ class PrintMonitor:
             except (TypeError, ValueError):
                 safe_fields = 0
             if not (safe_fields & getattr(win32con, "DM_COLOR", 2048)):
+                # dmFields does not advertise the color field; return None so
+                # the caller can try a lenient read next.
                 return None
-        return self._color_from_value(getattr(dev_mode, "dmColor", None) or getattr(dev_mode, "Color", None))
+        return self._color_from_value(color_raw)
 
     @staticmethod
     def _printer_supports_color(printer_name: str, printer_info: Dict[str, object]) -> Optional[bool]:
@@ -583,41 +595,105 @@ class PrintMonitor:
         printer_info: Dict[str, object],
         printer_name: str,
     ) -> tuple[str, str, bool]:
-        """Infer color mode from job DEVMODE, job properties, and printer capabilities."""
+        """Infer color mode from job DEVMODE, job properties, and printer capabilities.
 
+        Detection priority (first definitive answer wins):
+          1. Job DEVMODE strict: dmFields & DM_COLOR bit set. Trusted fully.
+          2. Job DEVMODE lenient: dmColor present but DM_COLOR bit absent. Trusted fully.
+          3. Job Color / dmColor flat property. Trusted fully.
+          4. Printer DEVMODE B&W only: printer default being color is meaningless
+             for a specific job; only use this source to confirm mono-only hardware.
+          5. DC_COLORDEVICE capability: mono=False -> B&W.
+             Color-capable printers with NO job signal -> B&W (conservative default).
+          6. Unknown -> black_and_white.
+
+        Key design rule for steps 4-6:
+          The printer's *default* DEVMODE / capability tells us about the hardware,
+          not about what mode a user chose for this specific job.  A color laser printer
+          will always advertise dmColor=DMCOLOR_COLOR (2) as its default even when the
+          user printed in monochrome.  Trusting that as "color" would make every job on
+          a color printer appear as color, which is exactly the bug being fixed here.
+          We therefore only accept a color result from the JOB's own DEVMODE (steps 1-3).
+        """
+
+        # 1. Job DEVMODE strict (dmFields & DM_COLOR must be set)
         detected = self._color_from_devmode(job_info.get("pDevMode"), require_explicit_field=True)
         if detected:
-            return detected, "job_devmode", False
+            logger.debug(
+                "Color detected via job DEVMODE (strict): printer=%s result=%s",
+                printer_name, detected,
+            )
+            return detected, "job_devmode_strict", False
 
+        # 2. Job DEVMODE lenient (dmColor present but dmFields bit may be absent)
+        detected = self._color_from_devmode(job_info.get("pDevMode"), require_explicit_field=False)
+        if detected:
+            logger.debug(
+                "Color detected via job DEVMODE (lenient): printer=%s result=%s",
+                printer_name, detected,
+            )
+            return detected, "job_devmode_lenient", False
+
+        # 3. Job Color / dmColor flat property
         job_color_value = job_info.get("Color")
         if job_color_value is None:
             job_color_value = job_info.get("dmColor")
         detected = self._color_from_value(job_color_value)
         if detected:
-            if detected == "black_and_white":
-                return detected, "job_properties_bw", False
             logger.debug(
-                "Ignoring ambiguous job color property for printer=%s because driver did not expose an explicit job DEVMODE color field.",
-                printer_name,
+                "Color detected via job Color property: printer=%s result=%s",
+                printer_name, detected,
             )
+            return detected, "job_color_property", False
 
-        detected = self._color_from_devmode(printer_info.get("pDevMode"), require_explicit_field=True)
-        if detected:
-            if detected == "black_and_white":
-                return detected, "printer_devmode", False
+        # 4a. Printer default DEVMODE strict
+        # Only accept B&W from this source. The printer's default dmColor = COLOR
+        # just means the printer's factory default is color; it says nothing about
+        # whether this specific job was sent in color or monochrome mode.
+        detected_printer = self._color_from_devmode(printer_info.get("pDevMode"), require_explicit_field=True)
+        if detected_printer == "black_and_white":
             logger.debug(
-                "Ignoring printer default color mode for classification: printer=%s",
-                printer_name,
+                "Printer DEVMODE (strict) confirms mono-only hardware: printer=%s", printer_name,
             )
+            return "black_and_white", "printer_devmode_strict", False
 
+        # 4b. Printer default DEVMODE lenient
+        detected_printer = self._color_from_devmode(printer_info.get("pDevMode"), require_explicit_field=False)
+        if detected_printer == "black_and_white":
+            logger.debug(
+                "Printer DEVMODE (lenient) confirms mono-only hardware: printer=%s", printer_name,
+            )
+            return "black_and_white", "printer_devmode_lenient", False
+
+        # 5. Printer hardware capability query (DC_COLORDEVICE)
         printer_supports_color = self._printer_supports_color(
             printer_name=printer_name,
             printer_info=printer_info,
         )
         if printer_supports_color is False:
-            return "black_and_white", "printer_capability", False
+            # Hardware-confirmed mono-only printer; definitely B&W.
+            logger.debug("Printer confirmed mono-only via DC_COLORDEVICE: printer=%s", printer_name)
+            return "black_and_white", "printer_capability_mono", False
         if printer_supports_color is True:
-            return "black_and_white", "default_warning", True
+            # Color-capable printer but the job provided NO color signal in its DEVMODE
+            # or Color property.  We cannot know from spooler data alone whether the user
+            # chose color or B&W in the print dialog.  Default to B&W (conservative) to
+            # avoid over-billing.  Emit a warning so the operator can catch misclassified
+            # color jobs by checking the log.
+            logger.warning(
+                "Color-capable printer with no job color/B&W signal: printer=%s. "
+                "Defaulting to black_and_white (conservative billing). "
+                "Run with PRINTX_LOG_LEVEL=DEBUG and check print_type_source in the log "
+                "if this job was actually printed in color.",
+                printer_name,
+            )
+            return "black_and_white", "default_bw_warning", True
+
+        # 6. No signal at all; default to black_and_white
+        logger.debug(
+            "No color signal found; defaulting to black_and_white for printer=%s",
+            printer_name,
+        )
         return "black_and_white", "default_unknown", False
 
     @staticmethod
@@ -691,10 +767,14 @@ class PrintMonitor:
         state["paper_size"] = metadata.get("paper_size", state.get("paper_size", "Unknown"))
         state["print_type_source"] = metadata.get("print_type_source", state.get("print_type_source", "default_unknown"))
         if metadata.get("default_warning") and not state.get("print_type_warning_logged"):
+            billed_as = state.get("print_type", "black_and_white")
             logger.warning(
-                "Color mode could not be read reliably for printer=%s job_id=%s. Defaulting billing to black and white.",
+                "Color mode could not be determined from job DEVMODE for printer=%s job_id=%s. "
+                "Billing as %s based on printer capability detection. "
+                "Verify the print job settings if this is incorrect.",
                 printer_name,
                 job_id,
+                billed_as,
             )
             state["print_type_warning_logged"] = True
 

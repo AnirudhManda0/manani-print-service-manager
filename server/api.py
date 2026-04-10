@@ -241,6 +241,16 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.delete("/api/services/catalog/{service_id}")
+    def delete_service_catalog(service_id: int) -> dict:
+        try:
+            deleted = db.delete_service_catalog(service_id)
+            if not deleted:
+                raise HTTPException(status_code=404, detail=f"service {service_id} not found")
+            return {"deleted": True, "id": service_id}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/services/record")
     def add_service_record(payload: ServiceRecordCreate) -> dict:
         try:

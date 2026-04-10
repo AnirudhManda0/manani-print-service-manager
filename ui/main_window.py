@@ -128,7 +128,6 @@ class MainWindow(QMainWindow):
 
         # Main content area uses tabbed pages.
         self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
         self.tabs.setTabPosition(QTabWidget.North)
         self.tabs.setIconSize(QSize(16, 16))
         root.addWidget(self.tabs, 1)
